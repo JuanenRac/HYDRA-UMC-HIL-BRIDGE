@@ -7,10 +7,10 @@ authors = ["JuanenRac (Electro Hobby 3D) <electrohobby3d@gmail.com>"]
 license = "GPL-3.0-only"
 readme = "README.md"
 
-# Skeleton stage - see SONNET/HYDRA-UMC-HIL-BRIDGE/mejoras_futuras.txt.
+# Bootstrap stage; real service dependencies are added with their implementation.
 # No external crates yet on purpose: this binary only prints its identity
 # and exits, so `cargo build` stays fast and dependency-free while the
-# project waits its turn in SONNET/5.PLAN_EJECUCION_32_PROYECTOS_NUEVOS.txt.
+# project remains fast and dependency-free during its bootstrap phase.
 # Planned once real business logic lands: tonic/prost (gRPC for high-speed
 # local sync with HYDRA-UMC-TWIN), tokio-tungstenite (WebSocket for remote
 # monitoring), and serde for joint-state message framing.

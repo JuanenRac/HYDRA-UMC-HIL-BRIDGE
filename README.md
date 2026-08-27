@@ -66,9 +66,8 @@ flowchart LR
 
 ## 📂 DIRECTORY STRUCTURE
 
-Pure software bridge, no own hardware design - so this project carries no
-`hardware/`, `firmware/` or `os/` folders (see the folder-pruning rule in
-`SONNET/5.PLAN_EJECUCION_32_PROYECTOS_NUEVOS.txt`).
+Pure software bridge with no hardware design of its own, so this project has
+no `hardware/`, `firmware/` or `os/` folders under the repository structure policy.
 
 ```text
 HYDRA-UMC-HIL-BRIDGE/
@@ -221,3 +220,14 @@ This project is part of a larger robotics ecosystem by the same author (JuanenRa
 
 ## 📜 LICENSE
 GPL-3.0 - See LICENSE for details.
+
+## 🛠️ BUILD & RUN
+
+Use the non-versioning build check before a release build:
+
+| Action | Windows | Linux / macOS |
+|---|---|---|
+| Build check (no version or CHANGELOG change) | `build-test.bat` | `./build-test.sh` |
+| Run / development (when provided) | `run*.bat` or `dev*.bat` | `./run*.sh` or `./dev*.sh` |
+
+`build-test.bat` and `build-test.sh` compile or validate the project stack without incrementing `hydra-umc.project.json` or modifying `CHANGELOG.md`. They may create normal compiler output only. Existing `build*.bat`, `build*.sh`, `run*` and `dev*` scripts retain their project-specific, versioned or runtime behavior; use them when that behavior is required.
