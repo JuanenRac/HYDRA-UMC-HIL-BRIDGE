@@ -119,12 +119,16 @@ impl CommandSink for SimulatedTransport {
 pub enum RouteOutcome {
     SentReal,
     SentSimulation,
-    BlockedByInterlock { reason: String },
+    BlockedByInterlock {
+        reason: String,
+    },
     /// The interlock allowed the command (or simulation mode never gates
     /// it), but the transport itself failed to deliver it - fail-safe:
     /// this is never reported as `SentReal`/`SentSimulation`, so a caller
     /// can never mistake a dropped command for a delivered one.
-    TransportFailure { reason: String },
+    TransportFailure {
+        reason: String,
+    },
 }
 
 pub struct Bridge {
