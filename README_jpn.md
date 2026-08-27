@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/Licencia-GPL%203.0-blue.svg" alt="GPL 3.0">
   <img src="https://img.shields.io/badge/Protocol-WebSocket%20%2F%20gRPC-yellow.svg" alt="Protocol">
   <img src="https://img.shields.io/badge/Feature-Zero--Latency%20Sync-green.svg" alt="Sync">
-  <img src="https://img.shields.io/badge/Stage-Functional%20v0-yellow.svg" alt="Functional v0 stage">
+  <img src="https://img.shields.io/badge/Stage-Established%20v0-brightgreen.svg" alt="Established v0 stage">
 </p>
 
 ---
@@ -33,8 +33,9 @@
 * 🌉 **双方向ブリッジ（v0、まだトランスポートなし）：** 実際のモードベースルーティング（実際/シミュレーション）と実際の無条件ミラーリングはすでに存在します。実際の HYDRA-UMC-TWIN や HYDRA-UMC コントローラーへの実際の gRPC/WebSocket 接続はまだありません。
 * ⚡ **ゼロレイテンシーミラーリング（部分的）：** 実際の `mirror` サブコマンドは、今日はコマンドをメモリ内の記録用シンクへミラーリングします。実際のネットワーク接続上での「ゼロレイテンシー」はまだ今後の課題です。
 * 📡 **統一プロトコル（計画中）：** 高速なローカル同期には gRPC を、リモート監視には WebSocket を使用します——意図的に、まだどのネットワークトランスポートも接続されていません（`Cargo.toml` を参照）。
+* 🧪 **ハードウェアなしでテスト可能なフェイルセーフ・トランスポート（v0）：** `CommandSink::send()` は今では実際の `Result` を返し、`SimulatedTransport` はタイムアウトまたは切断されたリンクをモデル化できます。ブリッジはコマンドが実際には届いていないのに届いたと主張することは決してなく、独立した `TransportFailure` という結果を報告します——`route` の `--transport-latency-ms`/`--transport-timeout-ms`/`--transport-disconnected` で実際に発生させて確認できます。
 
-**正直な現状確認 —— 今日実際に動くもの：** `route --mode real|simulation --joint 名前 --position 値 [--collision-risk] [--distance メートル]` は実際のルーティング判断を行います——`simulation` モードは常に送信し、`real` モードは `--collision-risk` が指定されるたびにコマンドをブロックする実際の安全インターロックの対象になります。`mirror --joint 名前 --position 値` はコマンドを無条件にミラーリングします。どちらもメモリ内の `RecordingSink` へルーティングされ、実際のコントローラーや実際の HYDRA-UMC-TWIN インスタンスへではありません——まだ gRPC/WebSocket トランスポートは存在しません。実際に出荷済みの内容は [`CHANGELOG.md`](CHANGELOG.md) を、まだ残っている作業は下記のロードマップを参照してください。
+**正直な現状確認 —— 今日実際に動くもの：** `route --mode real|simulation --joint 名前 --position 値 [--collision-risk] [--distance メートル] [--transport-latency-ms MS] [--transport-timeout-ms MS] [--transport-disconnected]` は実際のルーティング判断を行います——`simulation` モードは常に送信し、`real` モードは `--collision-risk` が指定されるたびにコマンドをブロックする実際の安全インターロックの対象になります。`mirror --joint 名前 --position 値` はコマンドを無条件にミラーリングします。どちらも既定ではメモリ内の受信先（`RecordingSink`、実際のコントローラーや実際の HYDRA-UMC-TWIN インスタンスではない）へルーティングされ、上記のトランスポートフラグが渡された場合は実際に失敗しうる（タイムアウト/切断）`SimulatedTransport` へルーティングされます——まだ gRPC/WebSocket トランスポートは存在しません。実際に出荷済みの内容は [`CHANGELOG.md`](CHANGELOG.md) を、まだ残っている作業は下記のロードマップを参照してください。
 
 ---
 
@@ -66,6 +67,8 @@ flowchart LR
 * **インターロックが距離しきい値から再導出する代わりに、ツイン自身の `collision_imminent` フラグを信頼する理由。** ツインはリスクを報告する時点で、すでに実際の幾何学的/物理的な推論を行っています——ここで独立した距離カットオフを使ってその結論に異議を唱えても、2 つ目の、場合によっては矛盾する安全上の意見が生まれるだけです。これが HYDRA-UMC-SAFETY-ZONES の検知と執行の境界をどう反映しているかについては、`interlock.rs` 自身のモジュールドキュメントを参照してください。
 * **`Simulation` モードが決してインターロックの対象にならない理由。** 実際のハードウェアではなくツインへコマンドをルーティングすることの意味そのものが、予測された衝突を安全に観察できるようにすることです——そこでブロックしてしまうと、この機能が支えるはずの目的そのものが失われます。
 * **`CommandSink` が今日、メモリ内実装 `RecordingSink` のみを持つトレイトである理由。** 実際の gRPC/WebSocket トランスポートはまだ存在しません（`Cargo.toml` 自身のコメントを参照）——`RecordingSink` はその点について正直です：送信を依頼された内容を記録するだけで、どこにも送信しません。これは HYDRA-UMC-SAFETY-ZONES の `NullEStopRequester` と同じ考え方です。
+* **`CommandSink::send()` が `()` ではなく `Result` を返す理由。** 実際のトランスポートは、インターロックがコマンドを通過させたかどうかとは無関係に、配送に失敗する（タイムアウト、切断）ことがあります——`send()` が失敗しえないなら、ブリッジには実際には届いていないコマンドについて成功を主張することを避ける手段がありません。`SimulatedTransport` は、実際のトランスポートの完成を待たずとも、この失敗経路を今日から実際にテスト可能にするために存在します。
+* **`TransportFailure` が `BlockedByInterlock` とは別の `RouteOutcome` である理由。** どちらも「起きなかった」という点では同じですが、種類が異なります——一方は意図的な安全上の拒否（インターロックが転送しないと決定した）、もう一方はベストエフォートの配送が単に完了しなかったというものです。これらを汎用的な失敗にまとめてしまうと、実際にどの安全層がコマンドを止めたのかが分からなくなります——デバッグに有用であり、両者を異なる扱いにする将来のポリシー（トランスポート失敗のリトライは妥当だが、インターロックによるブロックの後のリトライは妥当ではない）にも有用です。
 
 ---
 
@@ -79,16 +82,20 @@ flowchart LR
 HYDRA-UMC-HIL-BRIDGE/
 ├── src/
 │   ├── protocol.rs       # 実際の JointCommand/Mode 型
-│   ├── interlock.rs       # 実際の安全インターロック判断
-│   ├── bridge.rs            # 実際のモードベースルーティング + ミラーリング
-│   └── main.rs                 # エントリポイント + 実際の `route`/`mirror` サブコマンド
+│   ├── interlock.rs      # 実際の安全インターロック判断
+│   ├── bridge.rs         # 実際のモードベースルーティング + ミラーリング + CommandSink/SimulatedTransport
+│   └── main.rs           # エントリポイント + 実際の `route`/`mirror` サブコマンド
 ├── docs/                # ドキュメントと統合ガイド
 ├── build/               # ビルドノート/成果物（cargo 自身の出力は target/ にあり、gitignore 対象）
 ├── images/              # メディアと図表
 ├── scripts/             # ユーティリティスクリプト
+├── tools/
+│   ├── build_test.py    # バージョンを増やさないビルドチェック
+│   └── ci_validate.py   # CI が使用するマニフェスト/CHANGELOG/ドキュメント検証
 ├── Cargo.toml           # パッケージメタデータ、依存関係、オドメーターバージョン
 ├── bump_version.py      # オドメーター式バージョンインクリメント（build.sh/.bat が使用）
 ├── build.sh / build.bat # バージョンを増加させ、`cargo test`、その後 `cargo build --release` を実行
+├── build-test.sh / build-test.bat # バージョンを増やさないビルドチェック
 └── run.sh / run.bat     # コンパイル済みの release バイナリを実行（引数を転送）
 ```
 
@@ -101,7 +108,7 @@ Rust ツールチェーン（`cargo`/`rustc`、[rustup](https://rustup.rs) 経�
 
 ```bash
 # Linux / macOS
-./build.sh   # オドメーター式バージョンインクリメント、`cargo test`（7 件のテスト）、その後 `cargo build --release`
+./build.sh   # オドメーター式バージョンインクリメント、`cargo test`（14 件のテスト）、その後 `cargo build --release`
 ./run.sh     # target/release/hydra-umc-hil-bridge を実行し、名前 + バージョン + 役割を表示
 ```
 
@@ -130,11 +137,19 @@ run.bat
 
 ./run.sh mirror --joint elbow --position -0.3
 # MIRRORED: joint 'elbow' = -0.300000 shadowed into the twin
+
+./run.sh route --mode real --joint shoulder --position 0.5 --transport-timeout-ms 100 --transport-latency-ms 500
+# TRANSPORT FAILURE: command was not confirmed delivered (transport timed out after 100ms)
+
+./run.sh route --mode real --joint shoulder --position 0.5 --transport-disconnected
+# TRANSPORT FAILURE: command was not confirmed delivered (transport is disconnected)
 ```
 
 `route` は成功時に終了コード `0`、安全インターロックによってブロック
 された場合は `1`（これはエラーではなく、実際の意味のある結果です）、
-不正な入力の場合は `2` で終了します。`mirror` は `0` または `2` で
+不正な入力の場合は `2`、トランスポート失敗（インターロックは通過した
+が配送が確認されなかった）の場合は `3` で終了します。`mirror` は `0`、
+`2`、または `3` で
 終了します。
 
 `Cargo.toml` は今のところ意図的に外部クレートを一切含んでいません——

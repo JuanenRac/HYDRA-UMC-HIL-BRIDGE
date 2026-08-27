@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/Licencia-GPL%203.0-blue.svg" alt="GPL 3.0">
   <img src="https://img.shields.io/badge/Protocolo-WebSocket%20%2F%20gRPC-yellow.svg" alt="Protocol">
   <img src="https://img.shields.io/badge/Función-Sync%20Latencia%20Cero-green.svg" alt="Sync">
-  <img src="https://img.shields.io/badge/Etapa-Funcional%20v0-yellow.svg" alt="Etapa funcional v0">
+  <img src="https://img.shields.io/badge/Etapa-Establecido%20v0-brightgreen.svg" alt="Etapa establecido v0">
 </p>
 
 ---
@@ -28,8 +28,9 @@ Permite a los desarrolladores enviar comandos desde cualquier interfaz (App, Sui
 * 🌉 **Puente Bidireccional (v0, sin transporte todavía):** existe encaminamiento real basado en modo (Real/Simulación) y reflejo (mirroring) real e incondicional; todavía no hay ninguna conexión gRPC/WebSocket real hacia un HYDRA-UMC-TWIN o controlador HYDRA-UMC de verdad.
 * ⚡ **Mirroring de Latencia Cero (parcial):** el subcomando real `mirror` refleja hoy un comando hacia un receptor en memoria; "latencia cero" sobre una conexión de red real sigue siendo trabajo futuro.
 * 📡 **Protocolo Unificado (planeado):** usa gRPC para sincronización local de alta velocidad y WebSockets para monitorización remota - todavía no hay ningún transporte de red conectado, a propósito (ver `Cargo.toml`).
+* 🧪 **Transporte a prueba de fallos, testeable sin hardware (v0):** `CommandSink::send()` devuelve un `Result` real, y un `SimulatedTransport` puede modelar un enlace con timeout o desconectado; el puente reporta un resultado `TransportFailure` diferenciado en vez de afirmar jamás que un comando fue entregado cuando no lo fue - se puede probar vía `--transport-latency-ms`/`--transport-timeout-ms`/`--transport-disconnected` en `route`.
 
-**Comprobación de honestidad - qué funciona hoy de verdad:** `route --mode real|simulation --joint NOMBRE --position VALOR [--collision-risk] [--distance METROS]` toma una decisión real de encaminamiento - el modo `simulation` siempre envía, el modo `real` está sujeto a un enclavamiento de seguridad real que bloquea el comando siempre que se indique `--collision-risk`. `mirror --joint NOMBRE --position VALOR` refleja un comando incondicionalmente. Ambos encaminan hacia un `RecordingSink` en memoria, no hacia un controlador real ni una instancia real de HYDRA-UMC-TWIN - todavía no hay transporte gRPC/WebSocket. Ver [`CHANGELOG.md`](CHANGELOG.md) para lo entregado exactamente, y la Hoja de Ruta abajo para lo que sigue por delante.
+**Comprobación de honestidad - qué funciona hoy de verdad:** `route --mode real|simulation --joint NOMBRE --position VALOR [--collision-risk] [--distance METROS] [--transport-latency-ms MS] [--transport-timeout-ms MS] [--transport-disconnected]` toma una decisión real de encaminamiento - el modo `simulation` siempre envía, el modo `real` está sujeto a un enclavamiento de seguridad real que bloquea el comando siempre que se indique `--collision-risk`. `mirror --joint NOMBRE --position VALOR` refleja un comando incondicionalmente. Ambos encaminan por defecto hacia un receptor en memoria (`RecordingSink`, no un controlador real ni una instancia real de HYDRA-UMC-TWIN), o hacia un `SimulatedTransport` que puede fallar de verdad (timeout/desconexión) cuando se pasan los flags de transporte de arriba - todavía no hay transporte gRPC/WebSocket. Ver [`CHANGELOG.md`](CHANGELOG.md) para lo entregado exactamente, y la Hoja de Ruta abajo para lo que sigue por delante.
 
 ---
 
@@ -61,6 +62,8 @@ flowchart LR
 * **Por qué el enclavamiento confía en la propia bandera `collision_imminent` del gemelo en vez de derivar una a partir de un umbral de distancia.** El gemelo ya ha hecho el razonamiento geométrico/físico real en el momento en que reporta el riesgo - cuestionar esa conclusión aquí con un umbral de distancia independiente solo sería una segunda opinión de seguridad, posiblemente inconsistente. Ver la documentación propia del módulo `interlock.rs` para cómo esto refleja el límite detect-vs-enforce de HYDRA-UMC-SAFETY-ZONES.
 * **Por qué el modo `Simulation` nunca está sujeto al enclavamiento.** Todo el sentido de encaminar un comando hacia el gemelo en vez de hardware real es poder ver una colisión predicha desarrollarse de forma segura - bloquearla ahí anularía la propia función que existe para respaldar.
 * **Por qué `CommandSink` es un trait con solo una implementación en memoria `RecordingSink` hoy.** Todavía no existe ningún transporte gRPC/WebSocket real (ver el propio comentario de `Cargo.toml`) - `RecordingSink` es honesto al respecto: registra lo que se le pidió enviar sin transmitir a ningún sitio, el mismo razonamiento que `NullEStopRequester` en HYDRA-UMC-SAFETY-ZONES.
+* **Por qué `CommandSink::send()` devuelve un `Result` en vez de `()`.** Un transporte real puede fallar en la entrega (timeout, desconexión) con independencia de si el enclavamiento permitió el comando - si `send()` no puede fallar, el puente no tiene forma de evitar afirmar éxito ante un comando que nunca llegó de verdad. `SimulatedTransport` existe justamente para que ese camino de fallo sea real y testeable hoy, sin esperar a que exista un transporte real.
+* **Por qué `TransportFailure` es un `RouteOutcome` separado de `BlockedByInterlock`.** Son dos tipos distintos de "no ocurrió": uno es un rechazo deliberado de seguridad (el enclavamiento decidió no reenviarlo), el otro es una entrega de mejor esfuerzo que simplemente no se completó. Fusionarlos en un fallo genérico ocultaría qué capa de seguridad detuvo realmente el comando - útil para depurar y para cualquier política futura que los trate de forma distinta (reintentar un fallo de transporte es razonable; reintentar tras un bloqueo del enclavamiento no lo es).
 
 ---
 
@@ -73,16 +76,20 @@ proyecto no lleva carpetas `hardware/`, `firmware/` ni `os/`, conforme a la pol�
 HYDRA-UMC-HIL-BRIDGE/
 ├── src/
 │   ├── protocol.rs       # Tipos reales JointCommand/Mode
-│   ├── interlock.rs       # Decisión real de enclavamiento de seguridad
-│   ├── bridge.rs            # Encaminamiento real basado en modo + mirroring
-│   └── main.rs                 # Entry point + subcomandos reales `route`/`mirror`
+│   ├── interlock.rs      # Decisión real de enclavamiento de seguridad
+│   ├── bridge.rs         # Encaminamiento real basado en modo + mirroring + CommandSink/SimulatedTransport
+│   └── main.rs           # Entry point + subcomandos reales `route`/`mirror`
 ├── docs/                # Documentación y guías de integración
 ├── build/               # Notas/artefactos de build (la salida real de cargo vive en target/, en .gitignore)
 ├── images/              # Medios y diagramas
 ├── scripts/             # Scripts de utilidad
+├── tools/
+│   ├── build_test.py    # Comprobación de compilación sin versionado
+│   └── ci_validate.py   # Validación de manifiesto/CHANGELOG/docs usada por CI
 ├── Cargo.toml           # Metadatos del paquete, dependencias, version cuentakilometros
 ├── bump_version.py      # Bump de version tipo cuentakilometros (usado por build.sh/.bat)
 ├── build.sh / build.bat # Bump de version, `cargo test`, luego `cargo build --release`
+├── build-test.sh / build-test.bat # Comprobación de compilación sin versionado
 └── run.sh / run.bat     # Ejecuta el binario release compilado (reenvía argumentos)
 ```
 
@@ -94,7 +101,7 @@ Requiere el toolchain de Rust (`cargo`/`rustc`, instalar vía [rustup](https://r
 
 ```bash
 # Linux / macOS
-./build.sh   # bump de version cuentakilometros, `cargo test` (7 tests), luego `cargo build --release`
+./build.sh   # bump de version cuentakilometros, `cargo test` (14 tests), luego `cargo build --release`
 ./run.sh     # ejecuta target/release/hydra-umc-hil-bridge, imprime nombre + version + rol
 ```
 
@@ -120,9 +127,15 @@ Los subcomandos reales `route` y `mirror`:
 
 ./run.sh mirror --joint elbow --position -0.3
 # MIRRORED: joint 'elbow' = -0.300000 shadowed into the twin
+
+./run.sh route --mode real --joint shoulder --position 0.5 --transport-timeout-ms 100 --transport-latency-ms 500
+# TRANSPORT FAILURE: command was not confirmed delivered (transport timed out after 100ms)
+
+./run.sh route --mode real --joint shoulder --position 0.5 --transport-disconnected
+# TRANSPORT FAILURE: command was not confirmed delivered (transport is disconnected)
 ```
 
-`route` sale con `0` (enviado), `1` (bloqueado por el enclavamiento de seguridad - un resultado real y significativo, no un error), o `2` (entrada inválida). `mirror` sale con `0` o `2`.
+`route` sale con `0` (enviado), `1` (bloqueado por el enclavamiento de seguridad - un resultado real y significativo, no un error), `2` (entrada inválida), o `3` (fallo de transporte - el enclavamiento lo permitió, pero la entrega no se confirmó). `mirror` sale con `0`, `2` o `3`.
 
 `Cargo.toml` no lleva crates externos todavía a propósito - ver el comentario dentro del archivo para lo que se añade cuando empiece el trabajo real de transporte gRPC/WebSocket.
 

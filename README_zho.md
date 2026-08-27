@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/Licencia-GPL%203.0-blue.svg" alt="GPL 3.0">
   <img src="https://img.shields.io/badge/Protocol-WebSocket%20%2F%20gRPC-yellow.svg" alt="Protocol">
   <img src="https://img.shields.io/badge/Feature-Zero--Latency%20Sync-green.svg" alt="Sync">
-  <img src="https://img.shields.io/badge/Stage-Functional%20v0-yellow.svg" alt="Functional v0 stage">
+  <img src="https://img.shields.io/badge/Stage-Established%20v0-brightgreen.svg" alt="Established v0 stage">
 </p>
 
 ---
@@ -31,8 +31,9 @@
 * 🌉 **双向桥接（v0，尚无传输层）：** 真实的、基于模式（真实/仿真）的路由和真实的、无条件的镜像已经存在；目前还没有连接到真正的 HYDRA-UMC-TWIN 或 HYDRA-UMC 控制器的真实 gRPC/WebSocket 连接。
 * ⚡ **零延迟镜像（部分）：** 真实的 `mirror` 子命令今天会把指令镜像到一个内存中的记录接收器；在真实网络连接上的"零延迟"仍是未来工作。
 * 📡 **统一协议（计划中）：** 使用 gRPC 进行高速本地同步，使用 WebSocket 进行远程监控——目前故意还没有接入任何网络传输层（见 `Cargo.toml`）。
+* 🧪 **故障安全传输层，无需硬件即可测试（v0）：** `CommandSink::send()` 现在返回真实的 `Result`；新增的 `SimulatedTransport` 可以模拟超时或断开的链路，桥接服务会报告一个独立的 `TransportFailure` 结果，绝不会在指令实际未送达时声称已送达——可通过 `route` 上的 `--transport-latency-ms`/`--transport-timeout-ms`/`--transport-disconnected` 触发验证。
 
-**诚实说明——今天实际运行的内容：** `route --mode real|simulation --joint 名称 --position 数值 [--collision-risk] [--distance 米数]` 会做出真实的路由决策——`simulation` 模式总是发送，`real` 模式受真实安全联锁约束，只要设置了 `--collision-risk` 就会阻止指令。`mirror --joint 名称 --position 数值` 会无条件镜像一条指令。两者都路由到一个内存中的 `RecordingSink`，而非真正的控制器或真正的 HYDRA-UMC-TWIN 实例——目前还没有 gRPC/WebSocket 传输层。具体已交付内容请参见 [`CHANGELOG.md`](CHANGELOG.md)，尚待完成的内容请参见下方路线图。
+**诚实说明——今天实际运行的内容：** `route --mode real|simulation --joint 名称 --position 数值 [--collision-risk] [--distance 米数] [--transport-latency-ms 毫秒] [--transport-timeout-ms 毫秒] [--transport-disconnected]` 会做出真实的路由决策——`simulation` 模式总是发送，`real` 模式受真实安全联锁约束，只要设置了 `--collision-risk` 就会阻止指令。`mirror --joint 名称 --position 数值` 会无条件镜像一条指令。两者默认都路由到一个内存中的接收器（`RecordingSink`，而非真正的控制器或真正的 HYDRA-UMC-TWIN 实例），如果传入上述传输层参数，则路由到一个真的会失败（超时/断开）的 `SimulatedTransport`——目前还没有 gRPC/WebSocket 传输层。具体已交付内容请参见 [`CHANGELOG.md`](CHANGELOG.md)，尚待完成的内容请参见下方路线图。
 
 ---
 
@@ -63,6 +64,8 @@ flowchart LR
 * **为何联锁信任孪生系统自身的 `collision_imminent` 标志，而不是从距离阈值重新推导一个。** 孪生系统在报告风险时已经完成了真实的几何/物理推理——在这里用一个独立的距离阈值去质疑那个结论，只会得到第二个、可能不一致的安全意见。具体这如何呼应 HYDRA-UMC-SAFETY-ZONES 的检测-执行边界，见 `interlock.rs` 自身的模块文档。
 * **为何 `Simulation` 模式永远不受联锁约束。** 把指令路由到孪生系统而非真实硬件的全部意义，就在于能够安全地看到预测的碰撞真实发生——如果在那里阻止它，就违背了这个功能本身存在的意义。
 * **为何 `CommandSink` 今天只是一个只有内存实现 `RecordingSink` 的 trait。** 目前还没有真正的 gRPC/WebSocket 传输层（见 `Cargo.toml` 自身的注释）——`RecordingSink` 对此很诚实：它只记录被要求发送的内容，不会向任何地方传输，与 HYDRA-UMC-SAFETY-ZONES 中 `NullEStopRequester` 的思路完全相同。
+* **为何 `CommandSink::send()` 返回 `Result` 而非 `()`。** 无论联锁是否放行了该指令，真实传输层都可能送达失败（超时、断开）——如果 `send()` 不能失败，桥接服务就无法避免在指令从未真正到达时仍宣称成功。`SimulatedTransport` 存在的意义正是让这条失败路径在今天就是真实且可测试的，而不必等到真实传输层出现。
+* **为何 `TransportFailure` 是与 `BlockedByInterlock` 分开的 `RouteOutcome`。** 这是两种不同的「没有发生」：一种是刻意的安全拒绝（联锁决定不转发），另一种是尽力而为的投递未能完成。把两者合并成一个通用失败会掩盖到底是哪一层安全机制真正拦下了指令——这对调试有用，也为未来可能区别对待两者的策略留出空间（重试一次传输失败是合理的；重试一次联锁拦截则不是）。
 
 ---
 
@@ -75,16 +78,20 @@ flowchart LR
 HYDRA-UMC-HIL-BRIDGE/
 ├── src/
 │   ├── protocol.rs       # 真实的 JointCommand/Mode 类型
-│   ├── interlock.rs       # 真实的安全联锁决策
-│   ├── bridge.rs            # 真实的基于模式的路由 + 镜像
-│   └── main.rs                 # 入口点 + 真实的 `route`/`mirror` 子命令
+│   ├── interlock.rs      # 真实的安全联锁决策
+│   ├── bridge.rs         # 真实的基于模式的路由 + 镜像 + CommandSink/SimulatedTransport
+│   └── main.rs           # 入口点 + 真实的 `route`/`mirror` 子命令
 ├── docs/                # 文档与集成指南
 ├── build/               # 构建笔记/产物（cargo 自身的输出位于 target/，已被 gitignore）
 ├── images/              # 媒体与图表
 ├── scripts/             # 实用脚本
+├── tools/
+│   ├── build_test.py    # 不递增版本号的构建检查
+│   └── ci_validate.py   # CI 使用的清单/CHANGELOG/文档校验
 ├── Cargo.toml           # 包元数据、依赖项、里程表版本号
 ├── bump_version.py      # 里程表式版本递增（由 build.sh/.bat 使用）
 ├── build.sh / build.bat # 递增版本号、`cargo test`，然后执行 `cargo build --release`
+├── build-test.sh / build-test.bat # 不递增版本号的构建检查
 └── run.sh / run.bat     # 运行编译后的 release 二进制文件（转发参数）
 ```
 
@@ -97,7 +104,7 @@ HYDRA-UMC-HIL-BRIDGE/
 
 ```bash
 # Linux / macOS
-./build.sh   # 里程表式版本递增、`cargo test`（7 个测试），然后执行 `cargo build --release`
+./build.sh   # 里程表式版本递增、`cargo test`（14 个测试），然后执行 `cargo build --release`
 ./run.sh     # 运行 target/release/hydra-umc-hil-bridge，打印名称 + 版本 + 角色
 ```
 
@@ -125,11 +132,17 @@ run.bat
 
 ./run.sh mirror --joint elbow --position -0.3
 # MIRRORED: joint 'elbow' = -0.300000 shadowed into the twin
+
+./run.sh route --mode real --joint shoulder --position 0.5 --transport-timeout-ms 100 --transport-latency-ms 500
+# TRANSPORT FAILURE: command was not confirmed delivered (transport timed out after 100ms)
+
+./run.sh route --mode real --joint shoulder --position 0.5 --transport-disconnected
+# TRANSPORT FAILURE: command was not confirmed delivered (transport is disconnected)
 ```
 
 `route` 在发送成功时退出码为 `0`，被安全联锁阻止时为 `1`（这是一个真实
-且有意义的结果，不是错误），输入无效时为 `2`。`mirror` 退出码为 `0`
-或 `2`。
+且有意义的结果，不是错误），输入无效时为 `2`，传输失败时为 `3`
+（联锁放行了指令，但投递未被确认）。`mirror` 退出码为 `0`、`2` 或 `3`。
 
 `Cargo.toml` 目前刻意不包含任何外部 crate——具体在真正的 gRPC/WebSocket
 传输层工作开始时会添加什么，请见其内部的注释说明。

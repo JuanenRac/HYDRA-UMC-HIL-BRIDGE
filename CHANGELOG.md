@@ -20,6 +20,14 @@ semantic-versioning judgment calls:
 
 ---
 
+## [0.0.3] - Real v0: fail-safe transport layer, testable without hardware
+
+- **`bridge.rs`** - `CommandSink::send()` now returns `Result<(), TransportError>` instead of `()`. `TransportError` is `Timeout { after_ms }` or `Disconnected`. `RecordingSink` always succeeds (unchanged behavior); a new `SimulatedTransport` implementation models a slow (`latency_ms > timeout_ms`) or disconnected (`connected: false`) link with no real hardware involved.
+- **`bridge.rs`** - `RouteOutcome` gained `TransportFailure { reason }`: `route_command()` and `mirror_command()` now propagate a transport error as this outcome rather than ever reporting `SentReal`/`SentSimulation` when delivery wasn't actually confirmed - the interlock's `Block` and a transport failure are two distinct reasons a command can fail to reach hardware, and both must stop the bridge from claiming success.
+- **`main.rs`** - `route` gained `--transport-latency-ms`/`--transport-timeout-ms`/`--transport-disconnected` (all optional, default behavior unchanged) so the fail-safe path is exercisable from the CLI without any real hardware. New exit code 3 for `TransportFailure`.
+- 7 new tests (healthy/disconnected/timeout `SimulatedTransport` behavior including the `latency_ms == timeout_ms` boundary, real-mode routing never reporting `SentReal` on timeout or disconnection, and interlock block taking precedence over transport state). 14 tests total.
+- Real verification beyond the test suite: `route --transport-timeout-ms 100 --transport-latency-ms 500` and `--transport-disconnected` both correctly report `TRANSPORT FAILURE` with exit code 3, never `SENT`.
+
 ## [0.0.2] - Real v0 mode-based routing and safety interlock
 ### Added
 - `protocol.rs` - real `JointCommand` and `Mode` (Real/Simulation) types.

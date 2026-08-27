@@ -22,7 +22,7 @@ mod protocol;
 use std::env;
 use std::process::ExitCode;
 
-use bridge::{Bridge, RecordingSink, RouteOutcome};
+use bridge::{Bridge, CommandSink, RecordingSink, RouteOutcome, SimulatedTransport};
 use interlock::TwinRiskReport;
 use protocol::{JointCommand, Mode};
 
@@ -86,9 +86,36 @@ fn run_route(args: &[String]) -> ExitCode {
     };
 
     let bridge = Bridge::new(mode);
-    let mut real_sink = RecordingSink::default();
+
+    // Real transport isn't wired in yet (see Cargo.toml), but its
+    // fail-safe behavior needs to be exercisable without any hardware:
+    // `--transport-latency-ms`/`--transport-timeout-ms` swap the
+    // always-succeeds `RecordingSink` for a `SimulatedTransport` that can
+    // actually miss its budget. Omitting both flags is unchanged from
+    // before this flag existed.
+    let mut recording_real = RecordingSink::default();
+    let mut simulated_real = if has_flag(args, "--transport-disconnected") {
+        SimulatedTransport::disconnected()
+    } else {
+        SimulatedTransport::healthy().with_timeout(
+            find_flag(args, "--transport-latency-ms")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
+            find_flag(args, "--transport-timeout-ms")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(u64::MAX),
+        )
+    };
+    let use_simulated_transport = has_flag(args, "--transport-disconnected")
+        || has_flag(args, "--transport-latency-ms")
+        || has_flag(args, "--transport-timeout-ms");
+    let real_sink: &mut dyn CommandSink = if use_simulated_transport {
+        &mut simulated_real
+    } else {
+        &mut recording_real
+    };
     let mut sim_sink = RecordingSink::default();
-    let outcome = bridge.route_command(command, risk, &mut real_sink, &mut sim_sink);
+    let outcome = bridge.route_command(command, risk, real_sink, &mut sim_sink);
 
     match outcome {
         RouteOutcome::SentReal => {
@@ -102,6 +129,10 @@ fn run_route(args: &[String]) -> ExitCode {
         RouteOutcome::BlockedByInterlock { reason } => {
             println!("BLOCKED: safety interlock refused to forward to real hardware ({reason})");
             ExitCode::from(1)
+        }
+        RouteOutcome::TransportFailure { reason } => {
+            println!("TRANSPORT FAILURE: command was not confirmed delivered ({reason})");
+            ExitCode::from(3)
         }
     }
 }
@@ -117,12 +148,19 @@ fn run_mirror(args: &[String]) -> ExitCode {
 
     let bridge = Bridge::new(Mode::Simulation);
     let mut mirror_sink = RecordingSink::default();
-    bridge.mirror_command(&command, &mut mirror_sink);
-    println!(
-        "MIRRORED: joint '{}' = {:.6} shadowed into the twin",
-        command.joint, command.position
-    );
-    ExitCode::SUCCESS
+    match bridge.mirror_command(&command, &mut mirror_sink) {
+        Ok(()) => {
+            println!(
+                "MIRRORED: joint '{}' = {:.6} shadowed into the twin",
+                command.joint, command.position
+            );
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            println!("TRANSPORT FAILURE: shadow update was not confirmed delivered ({e})");
+            ExitCode::from(3)
+        }
+    }
 }
 
 fn main() -> ExitCode {
