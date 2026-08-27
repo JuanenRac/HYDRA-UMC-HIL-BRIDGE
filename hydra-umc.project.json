@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "ecosystem": "HYDRA-UMC",
+  "name": "HYDRA-UMC-HIL-BRIDGE",
+  "version": "0.0.2",
+  "role": "service",
+  "stack": "rust",
+  "technologies": [
+    "Rust",
+    "hardware-in-the-loop I/O"
+  ],
+  "deployment_target": "cm5",
+  "maturity": "functional",
+  "family": "Digital Twin & Simulation",
+  "parent": "HYDRA-UMC-TWIN",
+  "build": "cargo build --release.",
+  "notes": "Real v0 mode-based command routing (`route`/`mirror` subcommands): a real safety interlock blocks commands to real hardware whenever the twin reports an imminent collision, simulation-mode commands are never gated, and mirroring shadows a command into the twin unconditionally. Real gRPC/WebSocket transport stays future work - genuinely blocked on no live HYDRA-UMC-TWIN/HYDRA-UMC controller to talk to yet, not just unwritten code.",
+  "native_version": {
+    "file": "Cargo.toml",
+    "pattern": "^version\\s*=\\s*\"(\\d+)\\.(\\d+)\\.(\\d+)\""
+  }
+}

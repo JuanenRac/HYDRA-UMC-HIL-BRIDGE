@@ -1,0 +1,8 @@
+/target/
+Cargo.lock
+__pycache__/
+*.pyc
+# HYDRA-UMC shared secret protection
+.env
+.env.*
+!.env.example
