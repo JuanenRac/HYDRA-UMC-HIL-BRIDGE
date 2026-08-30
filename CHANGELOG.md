@@ -1,9 +1,8 @@
 # Changelog
 
-All notable work on **HYDRA-UMC-HIL-BRIDGE** is summarized here, newest first. Full
-session-by-session detail (including dates) lives in a private,
-unpublished internal log - this file is public, so it intentionally
-omits calendar dates.
+All notable public work on **HYDRA-UMC-HIL-BRIDGE** is summarized here,
+newest first. This changelog intentionally omits calendar dates and internal
+work-session detail.
 
 ## Versioning scheme
 
@@ -19,6 +18,13 @@ semantic-versioning judgment calls:
 - the same carry cascades into `MAJOR` if `MINOR` would exceed 9
 
 ---
+
+## Unreleased - Simulated transport ordering evidence
+
+- Added a deterministic test proving that commands confirmed by one local
+  `SimulatedTransport` retain issue order. It deliberately does not claim a
+  future network transport has that guarantee: a real transport must provide
+  its own sequence and acknowledgement evidence before hardware validation.
 
 ## [0.0.3] - Real v0: fail-safe transport layer, testable without hardware
 

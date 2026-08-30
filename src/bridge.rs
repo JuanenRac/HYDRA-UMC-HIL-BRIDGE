@@ -291,6 +291,18 @@ mod tests {
     }
 
     #[test]
+    fn simulated_transport_preserves_confirmed_command_order() {
+        // This is evidence for the local transport contract only: commands
+        // confirmed by one sink retain their issuance order. A real network
+        // transport must provide its own sequence/acknowledgement guarantee
+        // before it can claim this property across a connection.
+        let mut transport = SimulatedTransport::healthy();
+        transport.send(&cmd("j1", 0.1)).unwrap();
+        transport.send(&cmd("j2", 0.2)).unwrap();
+        assert_eq!(transport.received, vec![cmd("j1", 0.1), cmd("j2", 0.2)]);
+    }
+
+    #[test]
     fn real_mode_transport_timeout_never_reports_sent_real() {
         // The safe-failure path this vital improvement closes: interlock
         // allows the command (no risk reported), but the transport itself
