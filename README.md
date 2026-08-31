@@ -95,7 +95,7 @@ HYDRA-UMC-HIL-BRIDGE/
 
 ---
 
-## 🏗️ BUILD AND RUN
+## 🏗️ BUILD AND RUN GUIDE
 
 Requires the Rust toolchain (`cargo`/`rustc`, install via [rustup](https://rustup.rs)) and Python 3.10+ (only for `bump_version.py`).
 
