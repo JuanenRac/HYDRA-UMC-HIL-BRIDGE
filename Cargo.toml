@@ -1,17 +1,21 @@
 [package]
 name = "hydra-umc-hil-bridge"
-version = "0.0.3"
+version = "0.0.4"
 edition = "2021"
 description = "Hardware-in-the-loop interface for real-vs-virtual command syncing between HYDRA-UMC controllers and HYDRA-UMC-TWIN."
 authors = ["JuanenRac (Electro Hobby 3D) <electrohobby3d@gmail.com>"]
 license = "GPL-3.0-only"
 readme = "README.md"
 
-# Bootstrap stage; real service dependencies are added with their implementation.
-# No external crates yet on purpose: this binary only prints its identity
-# and exits, so `cargo build` stays fast and dependency-free while the
-# project remains fast and dependency-free during its bootstrap phase.
-# Planned once real business logic lands: tonic/prost (gRPC for high-speed
-# local sync with HYDRA-UMC-TWIN), tokio-tungstenite (WebSocket for remote
-# monitoring), and serde for joint-state message framing.
+# Real gap found auditing the ecosystem against actual CM5 hardware: the
+# real route/mirror bridging logic (bridge.rs, interlock.rs) was only
+# ever reachable as a one-shot CLI - still never any real gRPC/WebSocket
+# transport wired in (tonic/prost, tokio-tungstenite stay real future
+# work, not added here), but serde/serde_json/tiny_http now let a real
+# local caller reach the exact same decision logic the CLI already runs,
+# over a real blocking HTTP API (the closest Rust equivalent to this
+# ecosystem's other services' stdlib ThreadingHTTPServer).
 [dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tiny_http = "0.12"

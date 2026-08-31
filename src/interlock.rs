@@ -17,7 +17,7 @@
 //! physical motor-power enforcement still belongs to HYDRA-UMC (the
 //! firmware) alone.
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TwinRiskReport {
     pub collision_imminent: bool,
     pub distance_m: f64,

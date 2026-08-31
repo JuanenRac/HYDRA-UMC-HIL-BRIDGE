@@ -26,6 +26,34 @@ semantic-versioning judgment calls:
   future network transport has that guarantee: a real transport must provide
   its own sequence and acknowledgement evidence before hardware validation.
 
+## [0.0.4] - Real v0: JSON/HTTP server mode, plus CM5 deployment
+
+- **`protocol.rs`/`interlock.rs`/`bridge.rs`** - `JointCommand`, `Mode`,
+  `TwinRiskReport`, `RouteOutcome` gained `Serialize`/`Deserialize`
+  derives (behavior-preserving, additive only) so `server.rs` can hand
+  them straight to `serde_json` without a second, parallel JSON shape.
+  `Mode` serializes as lowercase (`"real"`/`"simulation"`), matching the
+  CLI's own `--mode` values.
+- **`server.rs`** (new) - `POST /route` and `POST /mirror` reach the
+  exact same `Bridge::route_command()`/`Bridge::mirror_command()` the
+  CLI's own `route`/`mirror` subcommands already run, over a real
+  `tiny_http` server (blocking, no async runtime - same convention as
+  `HYDRA-UMC-TWIN`'s own `server.rs`). No real gRPC/WebSocket transport
+  exists yet (see `Cargo.toml`), so both routes still only ever reach
+  `RecordingSink`/`SimulatedTransport`, the same honest fakes the CLI
+  already uses - this closes the "only reachable as a one-shot CLI" gap,
+  not that still-deferred transport question. Real gap this closes:
+  this project's own routing/interlock decision logic was only ever
+  reachable as a one-shot CLI.
+- **`main.rs`** - new `serve` subcommand (`--addr`/`--port`, default
+  `127.0.0.1:8113`).
+- **`systemd/hydra-umc-hil-bridge.service`** (new) - loopback-only unit
+  for `HYDRA-UMC-OS/provisioning/install_hil_bridge.sh` (new, that
+  repo), compiled as a release binary, same pattern as
+  `install_twin.sh`.
+- 8 new tests (`server.rs`'s own `#[cfg(test)]` module, real end-to-end
+  HTTP over a raw `TcpStream`) - 23 total.
+
 ## [0.0.3] - Real v0: fail-safe transport layer, testable without hardware
 
 - **`bridge.rs`** - `CommandSink::send()` now returns `Result<(), TransportError>` instead of `()`. `TransportError` is `Timeout { after_ms }` or `Disconnected`. `RecordingSink` always succeeds (unchanged behavior); a new `SimulatedTransport` implementation models a slow (`latency_ms > timeout_ms`) or disconnected (`connected: false`) link with no real hardware involved.

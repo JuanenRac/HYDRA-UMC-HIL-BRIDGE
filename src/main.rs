@@ -18,6 +18,7 @@
 mod bridge;
 mod interlock;
 mod protocol;
+mod server;
 
 use std::env;
 use std::process::ExitCode;
@@ -163,12 +164,32 @@ fn run_mirror(args: &[String]) -> ExitCode {
     }
 }
 
+fn run_serve(args: &[String]) -> ExitCode {
+    let addr = find_flag(args, "--addr").unwrap_or_else(|| "127.0.0.1".to_string());
+    let port = find_flag(args, "--port").unwrap_or_else(|| "8113".to_string());
+    let bind_addr = format!("{addr}:{port}");
+
+    match server::bind(&bind_addr) {
+        Ok(bound) => {
+            eprintln!("[hil-bridge] HTTP API listening on {bind_addr}");
+            eprintln!("[hil-bridge] POST /route, POST /mirror, GET /stats");
+            server::run(bound);
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("[hil-bridge] fatal: could not start HTTP server on {bind_addr}: {e}");
+            ExitCode::from(2)
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
 
     match args.first().map(|s| s.as_str()) {
         Some("route") => run_route(&args[1..]),
         Some("mirror") => run_mirror(&args[1..]),
+        Some("serve") => run_serve(&args[1..]),
         _ => {
             println!("{PROJECT_NAME} v{VERSION}");
             println!("{ROLE}");
