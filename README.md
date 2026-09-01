@@ -163,10 +163,11 @@ This project is part of a larger robotics ecosystem by the same author (JuanenRa
 
 ### Directly Related (outside the family)
 
-- **[HYDRA-UMC-SERVER](https://github.com/JuanenRac/HYDRA-UMC-SERVER)** — hardware-in-the-loop bridge target.
-- **[HYDRA-UMC-SUITE](https://github.com/JuanenRac/HYDRA-UMC-SUITE)** — hardware-in-the-loop bridge target.
-- **[HYDRA-UMC-ANDROID-CONTROL](https://github.com/JuanenRac/HYDRA-UMC-ANDROID-CONTROL)** — hardware-in-the-loop bridge target.
-- **[HYDRA-UMC-IOS-CONTROL](https://github.com/JuanenRac/HYDRA-UMC-IOS-CONTROL)** — hardware-in-the-loop bridge target.
+The overview names 3 client interfaces that can send commands through this bridge "as if it were a physical robot":
+- **[HYDRA-UMC-STUDIO](https://github.com/JuanenRac/HYDRA-UMC-STUDIO)** — web dashboard; one of the 3 interfaces the overview names as a command source.
+- **[HYDRA-UMC-SUITE](https://github.com/JuanenRac/HYDRA-UMC-SUITE)** — desktop command center; another of the 3 interfaces the overview names.
+- **[HYDRA-UMC-ANDROID-CONTROL](https://github.com/JuanenRac/HYDRA-UMC-ANDROID-CONTROL)** / **[HYDRA-UMC-IOS-CONTROL](https://github.com/JuanenRac/HYDRA-UMC-IOS-CONTROL)** — the "App" the overview names as the third interface.
+- **[HYDRA-UMC-SERVER](https://github.com/JuanenRac/HYDRA-UMC-SERVER)** — the backend behind all 3 of the above; the real controller `route --mode real` ultimately targets once a transport exists.
 
 ### Rest of the Ecosystem
 
