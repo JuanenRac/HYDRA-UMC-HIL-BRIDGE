@@ -238,8 +238,9 @@ run.bat
 
 
 ## 👤 作者
-**JuanenRac**（Electro Hobby 3D）
+**JuanenRac** (Electro Hobby 3D)
 📧 electrohobby3d@gmail.com
+📺 [youtube.com/@electrohobby3d](https://youtube.com/@electrohobby3d)
 
 ## 📜 许可证
 GPL-3.0 —— 详见 LICENSE。
