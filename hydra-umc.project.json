@@ -18,5 +18,8 @@
   "native_version": {
     "file": "Cargo.toml",
     "pattern": "^version\\s*=\\s*\"(\\d+)\\.(\\d+)\\.(\\d+)\""
+  },
+  "service": {
+    "systemd_unit": "hydra-umc-hil-bridge.service"
   }
 }
