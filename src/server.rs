@@ -68,7 +68,7 @@ struct MirrorRequest {
 }
 
 pub fn bind(addr: &str) -> std::io::Result<Server> {
-    Server::http(addr).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+    Server::http(addr).map_err(std::io::Error::other)
 }
 
 pub fn run(server: Server) {
@@ -76,7 +76,11 @@ pub fn run(server: Server) {
         let path = request.url().split('?').next().unwrap_or("").to_string();
 
         if path == "/stats" && request.method() == &Method::Get {
-            write_json(request, 200, &json!({"role": "Hardware-in-the-loop real-vs-virtual command bridge"}));
+            write_json(
+                request,
+                200,
+                &json!({"role": "Hardware-in-the-loop real-vs-virtual command bridge"}),
+            );
             continue;
         }
         if request.method() != &Method::Post {
@@ -87,7 +91,11 @@ pub fn run(server: Server) {
         let raw = match read_body(&mut request) {
             Ok(raw) => raw,
             Err(e) => {
-                write_json(request, 400, &json!({"error": format!("could not read request body: {e}")}));
+                write_json(
+                    request,
+                    400,
+                    &json!({"error": format!("could not read request body: {e}")}),
+                );
                 continue;
             }
         };
@@ -104,12 +112,19 @@ fn handle_route(request: tiny_http::Request, raw: &str) {
     let req: RouteRequest = match serde_json::from_str(raw) {
         Ok(r) => r,
         Err(e) => {
-            write_json(request, 400, &json!({"error": format!("malformed request JSON: {e}")}));
+            write_json(
+                request,
+                400,
+                &json!({"error": format!("malformed request JSON: {e}")}),
+            );
             return;
         }
     };
 
-    let command = JointCommand { joint: req.joint, position: req.position };
+    let command = JointCommand {
+        joint: req.joint,
+        position: req.position,
+    };
     let bridge = Bridge::new(req.mode);
 
     let mut recording_real = RecordingSink::default();
@@ -124,7 +139,11 @@ fn handle_route(request: tiny_http::Request, raw: &str) {
             req.transport.timeout_ms.unwrap_or(u64::MAX),
         )
     };
-    let real_sink: &mut dyn CommandSink = if use_simulated { &mut simulated_real } else { &mut recording_real };
+    let real_sink: &mut dyn CommandSink = if use_simulated {
+        &mut simulated_real
+    } else {
+        &mut recording_real
+    };
     let mut sim_sink = RecordingSink::default();
 
     let outcome = bridge.route_command(command, req.risk, real_sink, &mut sim_sink);
@@ -135,17 +154,28 @@ fn handle_mirror(request: tiny_http::Request, raw: &str) {
     let req: MirrorRequest = match serde_json::from_str(raw) {
         Ok(r) => r,
         Err(e) => {
-            write_json(request, 400, &json!({"error": format!("malformed request JSON: {e}")}));
+            write_json(
+                request,
+                400,
+                &json!({"error": format!("malformed request JSON: {e}")}),
+            );
             return;
         }
     };
 
-    let command = JointCommand { joint: req.joint, position: req.position };
+    let command = JointCommand {
+        joint: req.joint,
+        position: req.position,
+    };
     let bridge = Bridge::new(Mode::Simulation);
     let mut mirror_sink = RecordingSink::default();
     match bridge.mirror_command(&command, &mut mirror_sink) {
         Ok(()) => write_json(request, 200, &json!({"mirrored": true})),
-        Err(e) => write_json(request, 200, &json!({"mirrored": false, "error": e.to_string()})),
+        Err(e) => write_json(
+            request,
+            200,
+            &json!({"mirrored": false, "error": e.to_string()}),
+        ),
     }
 }
 
@@ -178,19 +208,28 @@ mod tests {
         stream.read_to_string(&mut raw).unwrap();
         let (headers, resp_body) = raw.split_once("\r\n\r\n").unwrap_or((raw.as_str(), ""));
         let status_line = headers.lines().next().unwrap_or("");
-        let status: u16 = status_line.split_whitespace().nth(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+        let status: u16 = status_line
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
         (status, resp_body.to_string())
     }
 
     fn get(port: u16, path: &str) -> (u16, String) {
         let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect must succeed");
-        let request = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+        let request =
+            format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
         stream.write_all(request.as_bytes()).unwrap();
         let mut raw = String::new();
         stream.read_to_string(&mut raw).unwrap();
         let (headers, body) = raw.split_once("\r\n\r\n").unwrap_or((raw.as_str(), ""));
         let status_line = headers.lines().next().unwrap_or("");
-        let status: u16 = status_line.split_whitespace().nth(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+        let status: u16 = status_line
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
         (status, body.to_string())
     }
 

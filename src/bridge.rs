@@ -115,8 +115,7 @@ impl CommandSink for SimulatedTransport {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-#[derive(serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub enum RouteOutcome {
     SentReal,
     SentSimulation,

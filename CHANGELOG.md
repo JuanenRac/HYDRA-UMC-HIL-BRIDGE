@@ -26,6 +26,14 @@ semantic-versioning judgment calls:
   future network transport has that guarantee: a real transport must provide
   its own sequence and acknowledgement evidence before hardware validation.
 
+## [0.0.5]
+
+- **Fixed CI**: `cargo fmt --check` was failing on `src/bridge.rs`/
+  `src/server.rs` (unwrapped lines), and `cargo clippy -- -D warnings`
+  was failing on `std::io::Error::new(ErrorKind::Other, e)` (now
+  `std::io::Error::other`, clippy's own suggested idiom). No behavior
+  change - `cargo test`: 23/23 passing throughout.
+
 ## [0.0.4] - Real v0: JSON/HTTP server mode, plus CM5 deployment
 
 - **`protocol.rs`/`interlock.rs`/`bridge.rs`** - `JointCommand`, `Mode`,

@@ -1,6 +1,6 @@
 [package]
 name = "hydra-umc-hil-bridge"
-version = "0.0.4"
+version = "0.0.5"
 edition = "2021"
 description = "Hardware-in-the-loop interface for real-vs-virtual command syncing between HYDRA-UMC controllers and HYDRA-UMC-TWIN."
 authors = ["JuanenRac (Electro Hobby 3D) <electrohobby3d@gmail.com>"]
