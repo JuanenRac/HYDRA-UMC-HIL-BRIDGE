@@ -102,7 +102,7 @@ Nécessite la chaîne d'outils Rust (`cargo`/`rustc`, à installer via [rustup](
 
 ```bash
 # Linux / macOS
-./build.sh   # incrément de version compteur kilométrique, `cargo test` (14 tests), puis `cargo build --release`
+./build.sh   # incrément de version compteur kilométrique, `cargo test` (23 tests), puis `cargo build --release`
 ./run.sh     # exécute target/release/hydra-umc-hil-bridge, affiche nom + version + rôle
 ```
 

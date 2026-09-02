@@ -101,7 +101,7 @@ Requiere el toolchain de Rust (`cargo`/`rustc`, instalar vía [rustup](https://r
 
 ```bash
 # Linux / macOS
-./build.sh   # bump de version cuentakilometros, `cargo test` (14 tests), luego `cargo build --release`
+./build.sh   # bump de version cuentakilometros, `cargo test` (23 tests), luego `cargo build --release`
 ./run.sh     # ejecuta target/release/hydra-umc-hil-bridge, imprime nombre + version + rol
 ```
 

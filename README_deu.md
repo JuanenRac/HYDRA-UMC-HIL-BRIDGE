@@ -102,7 +102,7 @@ Erfordert die Rust-Toolchain (`cargo`/`rustc`, Installation via [rustup](https:/
 
 ```bash
 # Linux / macOS
-./build.sh   # Kilometerzähler-Versions-Bump, `cargo test` (14 Tests), dann `cargo build --release`
+./build.sh   # Kilometerzähler-Versions-Bump, `cargo test` (23 Tests), dann `cargo build --release`
 ./run.sh     # führt target/release/hydra-umc-hil-bridge aus, gibt Name + Version + Rolle aus
 ```
 

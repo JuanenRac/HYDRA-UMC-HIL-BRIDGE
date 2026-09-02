@@ -104,7 +104,7 @@ HYDRA-UMC-HIL-BRIDGE/
 
 ```bash
 # Linux / macOS
-./build.sh   # 里程表式版本递增、`cargo test`（14 个测试），然后执行 `cargo build --release`
+./build.sh   # 里程表式版本递增、`cargo test`（23 个测试），然后执行 `cargo build --release`
 ./run.sh     # 运行 target/release/hydra-umc-hil-bridge，打印名称 + 版本 + 角色
 ```
 
