@@ -184,7 +184,7 @@ run.bat
 
 ### 直接関連（ファミリー外）
 
-- **[HYDRA-UMC-SERVER](https://github.com/JuanenRac/HYDRA-UMC-SERVER)** —— ハードウェア・イン・ザ・ループブリッジの対象。
+- **[HYDRA-UMC-SERVER](https://github.com/JuanenRac/HYDRA-UMC-SERVER)** —— 上記3つすべての背後にあるバックエンド。トランスポートが存在するようになれば、`route --mode real` が最終的にターゲットとする実際のコントローラー。
 - **[HYDRA-UMC-SUITE](https://github.com/JuanenRac/HYDRA-UMC-SUITE)** —— ハードウェア・イン・ザ・ループブリッジの対象。
 - **[HYDRA-UMC-ANDROID-CONTROL](https://github.com/JuanenRac/HYDRA-UMC-ANDROID-CONTROL)** —— ハードウェア・イン・ザ・ループブリッジの対象。
 - **[HYDRA-UMC-IOS-CONTROL](https://github.com/JuanenRac/HYDRA-UMC-IOS-CONTROL)** —— ハードウェア・イン・ザ・ループブリッジの対象。

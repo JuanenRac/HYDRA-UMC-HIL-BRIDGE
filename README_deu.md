@@ -164,7 +164,7 @@ Dieses Projekt ist Teil eines größeren Robotik-Ökosystems desselben Autors (J
 
 ### Direkte Beziehung (außerhalb der Familie)
 
-- **[HYDRA-UMC-SERVER](https://github.com/JuanenRac/HYDRA-UMC-SERVER)** — Ziel der Hardware-in-the-Loop-Brücke.
+- **[HYDRA-UMC-SERVER](https://github.com/JuanenRac/HYDRA-UMC-SERVER)** — das Backend hinter allen 3 oben genannten; der echte Controller, den `route --mode real` letztendlich anspricht, sobald ein Transport existiert.
 - **[HYDRA-UMC-SUITE](https://github.com/JuanenRac/HYDRA-UMC-SUITE)** — Ziel der Hardware-in-the-Loop-Brücke.
 - **[HYDRA-UMC-ANDROID-CONTROL](https://github.com/JuanenRac/HYDRA-UMC-ANDROID-CONTROL)** — Ziel der Hardware-in-the-Loop-Brücke.
 - **[HYDRA-UMC-IOS-CONTROL](https://github.com/JuanenRac/HYDRA-UMC-IOS-CONTROL)** — Ziel der Hardware-in-the-Loop-Brücke.

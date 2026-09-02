@@ -173,7 +173,7 @@ run.bat
 
 ### 直接相关（项目族之外）
 
-- **[HYDRA-UMC-SERVER](https://github.com/JuanenRac/HYDRA-UMC-SERVER)** —— 硬件在环桥接的目标。
+- **[HYDRA-UMC-SERVER](https://github.com/JuanenRac/HYDRA-UMC-SERVER)** —— 上述 3 项背后的后端;一旦传输层存在,`route --mode real` 最终指向的真实控制器。
 - **[HYDRA-UMC-SUITE](https://github.com/JuanenRac/HYDRA-UMC-SUITE)** —— 硬件在环桥接的目标。
 - **[HYDRA-UMC-ANDROID-CONTROL](https://github.com/JuanenRac/HYDRA-UMC-ANDROID-CONTROL)** —— 硬件在环桥接的目标。
 - **[HYDRA-UMC-IOS-CONTROL](https://github.com/JuanenRac/HYDRA-UMC-IOS-CONTROL)** —— 硬件在环桥接的目标。
