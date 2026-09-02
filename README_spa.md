@@ -78,16 +78,19 @@ HYDRA-UMC-HIL-BRIDGE/
 │   ├── protocol.rs       # Tipos reales JointCommand/Mode
 │   ├── interlock.rs      # Decisión real de enclavamiento de seguridad
 │   ├── bridge.rs         # Encaminamiento real basado en modo + mirroring + CommandSink/SimulatedTransport
+│   ├── server.rs         # Superficie JSON/HTTP plana (tiny_http, bloqueante, sin runtime async)
 │   └── main.rs           # Entry point + subcomandos reales `route`/`mirror`
 ├── docs/                # Documentación y guías de integración
 ├── build/               # Notas/artefactos de build (la salida real de cargo vive en target/, en .gitignore)
 ├── images/              # Medios y diagramas
-├── scripts/             # Scripts de utilidad
+├── systemd/
+│   └── hydra-umc-hil-bridge.service # Unidad systemd de la API local de route/mirror en la CM5
 ├── tools/
 │   ├── build_test.py    # Comprobación de compilación sin versionado
 │   └── ci_validate.py   # Validación de manifiesto/CHANGELOG/docs usada por CI
 ├── Cargo.toml           # Metadatos del paquete, dependencias, version cuentakilometros
-├── bump_version.py      # Bump de version tipo cuentakilometros (usado por build.sh/.bat)
+├── bump_version.py      # Bump de version nativa tipo cuentakilometros (usado por build.sh/.bat)
+├── bump_manifest_version.py # Sincroniza la versión de hydra-umc.project.json con la nativa (--sync)
 ├── build.sh / build.bat # Bump de version, `cargo test`, luego `cargo build --release`
 ├── build-test.sh / build-test.bat # Comprobación de compilación sin versionado
 └── run.sh / run.bat     # Ejecuta el binario release compilado (reenvía argumentos)

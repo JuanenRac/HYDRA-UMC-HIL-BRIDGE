@@ -84,16 +84,19 @@ HYDRA-UMC-HIL-BRIDGE/
 │   ├── protocol.rs       # 実際の JointCommand/Mode 型
 │   ├── interlock.rs      # 実際の安全インターロック判断
 │   ├── bridge.rs         # 実際のモードベースルーティング + ミラーリング + CommandSink/SimulatedTransport
+│   ├── server.rs         # シンプルなJSON/HTTPサーフェス(tiny_http、ブロッキング、非同期ランタイムなし)
 │   └── main.rs           # エントリポイント + 実際の `route`/`mirror` サブコマンド
 ├── docs/                # ドキュメントと統合ガイド
 ├── build/               # ビルドノート/成果物（cargo 自身の出力は target/ にあり、gitignore 対象）
 ├── images/              # メディアと図表
-├── scripts/             # ユーティリティスクリプト
+├── systemd/
+│   └── hydra-umc-hil-bridge.service # ローカルCM5 route/mirror APIのsystemdユニット
 ├── tools/
 │   ├── build_test.py    # バージョンを増やさないビルドチェック
 │   └── ci_validate.py   # CI が使用するマニフェスト/CHANGELOG/ドキュメント検証
 ├── Cargo.toml           # パッケージメタデータ、依存関係、オドメーターバージョン
-├── bump_version.py      # オドメーター式バージョンインクリメント（build.sh/.bat が使用）
+├── bump_version.py      # ネイティブバージョンのオドメーター式インクリメント（build.sh/.bat が使用）
+├── bump_manifest_version.py # hydra-umc.project.json のバージョンをネイティブ版と同期(--sync)
 ├── build.sh / build.bat # バージョンを増加させ、`cargo test`、その後 `cargo build --release` を実行
 ├── build-test.sh / build-test.bat # バージョンを増やさないビルドチェック
 └── run.sh / run.bat     # コンパイル済みの release バイナリを実行（引数を転送）

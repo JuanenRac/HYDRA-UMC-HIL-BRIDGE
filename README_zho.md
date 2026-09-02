@@ -80,16 +80,19 @@ HYDRA-UMC-HIL-BRIDGE/
 │   ├── protocol.rs       # 真实的 JointCommand/Mode 类型
 │   ├── interlock.rs      # 真实的安全联锁决策
 │   ├── bridge.rs         # 真实的基于模式的路由 + 镜像 + CommandSink/SimulatedTransport
+│   ├── server.rs         # 简洁的 JSON/HTTP 接口(tiny_http,阻塞式,无异步运行时)
 │   └── main.rs           # 入口点 + 真实的 `route`/`mirror` 子命令
 ├── docs/                # 文档与集成指南
 ├── build/               # 构建笔记/产物（cargo 自身的输出位于 target/，已被 gitignore）
 ├── images/              # 媒体与图表
-├── scripts/             # 实用脚本
+├── systemd/
+│   └── hydra-umc-hil-bridge.service # 本地 CM5 route/mirror API 的 systemd 单元
 ├── tools/
 │   ├── build_test.py    # 不递增版本号的构建检查
 │   └── ci_validate.py   # CI 使用的清单/CHANGELOG/文档校验
 ├── Cargo.toml           # 包元数据、依赖项、里程表版本号
-├── bump_version.py      # 里程表式版本递增（由 build.sh/.bat 使用）
+├── bump_version.py      # 原生版本的里程表式递增（由 build.sh/.bat 使用）
+├── bump_manifest_version.py # 将 hydra-umc.project.json 的版本与原生版本同步(--sync)
 ├── build.sh / build.bat # 递增版本号、`cargo test`，然后执行 `cargo build --release`
 ├── build-test.sh / build-test.bat # 不递增版本号的构建检查
 └── run.sh / run.bat     # 运行编译后的 release 二进制文件（转发参数）
