@@ -29,8 +29,9 @@ Il permet aux développeurs d'envoyer des commandes depuis n'importe quelle inte
 * ⚡ **Mise en miroir sans latence (partiel) :** le vrai sous-commande `mirror` reflète aujourd'hui une commande vers un récepteur en mémoire ; la « latence zéro » sur une vraie connexion réseau reste du travail futur.
 * 📡 **Protocole unifié (prévu) :** utilise gRPC pour une synchronisation locale haute vitesse et les WebSockets pour la surveillance à distance - aucun transport réseau n'est encore branché, volontairement (voir `Cargo.toml`).
 * 🧪 **Transport à sécurité intrinsèque, testable sans matériel (v0) :** `CommandSink::send()` renvoie désormais un vrai `Result`, et un `SimulatedTransport` peut simuler une liaison en timeout ou déconnectée ; le pont rapporte un résultat `TransportFailure` distinct plutôt que de jamais prétendre qu'une commande a été livrée alors qu'elle ne l'a pas été - exerçable via `--transport-latency-ms`/`--transport-timeout-ms`/`--transport-disconnected` sur `route`.
+* 🌐 **API HTTP JSON (v0) :** `serve [--addr ADDR] [--port PORT]` (par défaut `127.0.0.1:8113`) expose exactement la même logique d'acheminement/mise en miroir via `POST /route`, `POST /mirror` et `GET /stats` sur un vrai serveur `tiny_http` bloquant - le même binaire que celui exécuté par l'unité `systemd/hydra-umc-hil-bridge.service` sur une CM5 déployée, en loopback uniquement. Voir [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) pour le contrat complet requête/réponse.
 
-**Vérification d'honnêteté - ce qui fonctionne réellement aujourd'hui :** `route --mode real|simulation --joint NOM --position VALEUR [--collision-risk] [--distance MÈTRES] [--transport-latency-ms MS] [--transport-timeout-ms MS] [--transport-disconnected]` prend une vraie décision d'acheminement - le mode `simulation` envoie toujours, le mode `real` est soumis à un vrai verrouillage de sécurité qui bloque la commande dès que `--collision-risk` est indiqué. `mirror --joint NOM --position VALEUR` reflète une commande inconditionnellement. Les deux acheminent par défaut vers un récepteur en mémoire (`RecordingSink`, pas un vrai contrôleur ni une vraie instance HYDRA-UMC-TWIN), ou vers un `SimulatedTransport` qui peut réellement échouer (timeout/déconnexion) quand les indicateurs de transport ci-dessus sont passés - il n'y a pas encore de transport gRPC/WebSocket. Voir [`CHANGELOG.md`](CHANGELOG.md) pour ce qui a été livré exactement, et la Roadmap ci-dessous pour ce qui reste à venir.
+**Vérification d'honnêteté - ce qui fonctionne réellement aujourd'hui :** `route --mode real|simulation --joint NOM --position VALEUR [--collision-risk] [--distance MÈTRES] [--transport-latency-ms MS] [--transport-timeout-ms MS] [--transport-disconnected]` prend une vraie décision d'acheminement - le mode `simulation` envoie toujours, le mode `real` est soumis à un vrai verrouillage de sécurité qui bloque la commande dès que `--collision-risk` est indiqué. `mirror --joint NOM --position VALEUR` reflète une commande inconditionnellement. `serve` expose les deux via du vrai HTTP JSON plutôt que des invocations CLI ponctuelles. Tous les trois acheminent par défaut vers un récepteur en mémoire (`RecordingSink`, pas un vrai contrôleur ni une vraie instance HYDRA-UMC-TWIN), ou vers un `SimulatedTransport` qui peut réellement échouer (timeout/déconnexion) quand les indicateurs de transport ci-dessus sont passés - il n'y a pas encore de transport gRPC/WebSocket. Voir [`CHANGELOG.md`](CHANGELOG.md) pour ce qui a été livré exactement, [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) pour chaque commande/endpoint, et la Roadmap ci-dessous pour ce qui reste à venir.
 
 ---
 
@@ -141,7 +142,21 @@ Les vrais sous-commandes `route` et `mirror` :
 
 `route` se termine avec `0` (envoyé), `1` (bloqué par le verrouillage de sécurité - un vrai résultat significatif, pas une erreur), `2` (entrée invalide), ou `3` (échec de transport - le verrouillage a laissé passer la commande, mais la livraison n'a pas été confirmée). `mirror` se termine avec `0`, `2` ou `3`.
 
-`Cargo.toml` ne comporte volontairement aucune crate externe pour l'instant - voir le commentaire dans le fichier pour ce qui sera ajouté quand le vrai travail de transport gRPC/WebSocket commencera.
+La même logique d'acheminement/mise en miroir est aussi accessible via du vrai HTTP JSON :
+
+```bash
+./run.sh serve --addr 127.0.0.1 --port 8113
+# [hil-bridge] HTTP API listening on 127.0.0.1:8113
+# [hil-bridge] POST /route, POST /mirror, GET /stats
+
+curl -X POST http://127.0.0.1:8113/route \
+    -d '{"mode":"real","joint":"shoulder","position":1.0,"risk":{"collision_imminent":true,"distance_m":0.02}}'
+# {"BlockedByInterlock":{"reason":"twin reports imminent collision at 0.020m"}}
+```
+
+Voir [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) pour le contrat complet requête/réponse de `POST /route`/`POST /mirror`/`GET /stats` - c'est le même binaire que celui exécuté par l'unité `systemd/hydra-umc-hil-bridge.service` sur une CM5 déployée.
+
+`Cargo.toml` ne comporte volontairement aucune crate externe pour l'instant, en dehors de `tiny_http`/`serde`/`serde_json` (la vraie interface HTTP JSON) - voir le commentaire dans le fichier pour ce qui sera ajouté quand le vrai travail de transport gRPC/WebSocket commencera.
 
 ---
 
@@ -242,6 +257,7 @@ Ce projet fait partie de l'écosystème robotique HYDRA-UMC du même auteur (Jua
 
 ## 📚 Documentation & Communauté
 
+- **[docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md)** — chaque invocation de `route`/`mirror`/`serve`, une sortie réelle capturée depuis un binaire release compilé, le tableau des codes de sortie, et le contrat HTTP JSON de `POST /route`/`POST /mirror`/`GET /stats`.
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — pile technologique et lignes directrices de codage pour une pull request.
 - **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)** — les normes de comportement attendues dans cette communauté.
 - **[SECURITY.md](SECURITY.md)** — comment signaler une vulnérabilité, et les véritables axes de sécurité de ce projet.

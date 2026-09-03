@@ -29,8 +29,9 @@ It allows developers to send commands from any interface (App, Suite, Studio) to
 * ⚡ **Zero-Latency Mirroring (partial):** the real `mirror` subcommand shadows a command into a recording sink today; "zero-latency" over a real network connection is still future work.
 * 📡 **Unified Protocol (planned):** uses gRPC for high-speed local sync and WebSockets for remote monitoring - no network transport is wired in yet, on purpose (see `Cargo.toml`).
 * 🧪 **Fail-safe transport, testable without hardware (v0):** `CommandSink::send()` returns a real `Result`, and a `SimulatedTransport` can model a timed-out or disconnected link; the bridge reports a distinct `TransportFailure` outcome rather than ever claiming a command was delivered when it wasn't - exercisable via `--transport-latency-ms`/`--transport-timeout-ms`/`--transport-disconnected` on `route`.
+* 🌐 **HTTP JSON API (v0):** `serve [--addr ADDR] [--port PORT]` (default `127.0.0.1:8113`) exposes the exact same routing/mirroring logic over `POST /route`, `POST /mirror` and `GET /stats` via a real blocking `tiny_http` server - the same binary a deployed CM5's `systemd/hydra-umc-hil-bridge.service` unit runs loopback-only. See [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) for the full request/response contract.
 
-**Honesty check - what actually runs today:** `route --mode real|simulation --joint NAME --position VALUE [--collision-risk] [--distance METERS] [--transport-latency-ms MS] [--transport-timeout-ms MS] [--transport-disconnected]` makes a real routing decision - `simulation` mode always sends, `real` mode is gated by a real safety interlock that blocks the command whenever `--collision-risk` is set. `mirror --joint NAME --position VALUE` shadows a command unconditionally. Both route to an in-memory sink by default (`RecordingSink`, not a real controller or a real HYDRA-UMC-TWIN instance), or to a `SimulatedTransport` that can genuinely fail (timeout/disconnect) when the transport flags above are passed - there is no gRPC/WebSocket transport yet. See [`CHANGELOG.md`](CHANGELOG.md) for exactly what shipped, and the Roadmap below for what's still ahead.
+**Honesty check - what actually runs today:** `route --mode real|simulation --joint NAME --position VALUE [--collision-risk] [--distance METERS] [--transport-latency-ms MS] [--transport-timeout-ms MS] [--transport-disconnected]` makes a real routing decision - `simulation` mode always sends, `real` mode is gated by a real safety interlock that blocks the command whenever `--collision-risk` is set. `mirror --joint NAME --position VALUE` shadows a command unconditionally. `serve` exposes both over real HTTP JSON instead of one-shot CLI invocations. All three route to an in-memory sink by default (`RecordingSink`, not a real controller or a real HYDRA-UMC-TWIN instance), or to a `SimulatedTransport` that can genuinely fail (timeout/disconnect) when the transport flags above are passed - there is no gRPC/WebSocket transport yet. See [`CHANGELOG.md`](CHANGELOG.md) for exactly what shipped, [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) for every command/endpoint, and the Roadmap below for what's still ahead.
 
 ---
 
@@ -140,7 +141,21 @@ The real `route` and `mirror` subcommands:
 
 `route` exits `0` (sent), `1` (blocked by the safety interlock - a real, meaningful outcome, not an error), `2` (bad input), or `3` (transport failure - the interlock allowed it, but delivery wasn't confirmed). `mirror` exits `0`, `2`, or `3`.
 
-`Cargo.toml` intentionally carries no external crates yet - see the comment inside it for what gets added once real gRPC/WebSocket transport work starts.
+The same routing/mirroring logic is also reachable over real HTTP JSON:
+
+```bash
+./run.sh serve --addr 127.0.0.1 --port 8113
+# [hil-bridge] HTTP API listening on 127.0.0.1:8113
+# [hil-bridge] POST /route, POST /mirror, GET /stats
+
+curl -X POST http://127.0.0.1:8113/route \
+    -d '{"mode":"real","joint":"shoulder","position":1.0,"risk":{"collision_imminent":true,"distance_m":0.02}}'
+# {"BlockedByInterlock":{"reason":"twin reports imminent collision at 0.020m"}}
+```
+
+See [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) for the full `POST /route`/`POST /mirror`/`GET /stats` request/response contract - this is the same binary a deployed CM5's `systemd/hydra-umc-hil-bridge.service` unit runs.
+
+`Cargo.toml` intentionally carries no external crates yet beyond `tiny_http`/`serde`/`serde_json` (the real HTTP JSON surface) - see the comment inside it for what else gets added once real gRPC/WebSocket transport work starts.
 
 ---
 
@@ -241,6 +256,7 @@ This project is part of the HYDRA-UMC robotics ecosystem by the same author (Jua
 
 ## 📚 Documentation & Community
 
+- **[docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md)** — every `route`/`mirror`/`serve` invocation, real output captured from a built release binary, the exit-code table, and the `POST /route`/`POST /mirror`/`GET /stats` HTTP JSON contract.
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — tech stack and coding guidelines for a pull request.
 - **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)** — the standards of behavior expected in this community.
 - **[SECURITY.md](SECURITY.md)** — how to report a vulnerability, and this project's own real security focus areas.

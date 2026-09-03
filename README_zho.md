@@ -32,8 +32,9 @@
 * ⚡ **零延迟镜像（部分）：** 真实的 `mirror` 子命令今天会把指令镜像到一个内存中的记录接收器；在真实网络连接上的"零延迟"仍是未来工作。
 * 📡 **统一协议（计划中）：** 使用 gRPC 进行高速本地同步，使用 WebSocket 进行远程监控——目前故意还没有接入任何网络传输层（见 `Cargo.toml`）。
 * 🧪 **故障安全传输层，无需硬件即可测试（v0）：** `CommandSink::send()` 现在返回真实的 `Result`；新增的 `SimulatedTransport` 可以模拟超时或断开的链路，桥接服务会报告一个独立的 `TransportFailure` 结果，绝不会在指令实际未送达时声称已送达——可通过 `route` 上的 `--transport-latency-ms`/`--transport-timeout-ms`/`--transport-disconnected` 触发验证。
+* 🌐 **HTTP JSON API（v0）：** `serve [--addr ADDR] [--port PORT]`（默认 `127.0.0.1:8113`）通过一个真实的阻塞式 `tiny_http` 服务器，把同样的路由/镜像逻辑以 `POST /route`、`POST /mirror`、`GET /stats` 的形式对外提供——与部署到 CM5 上的 `systemd/hydra-umc-hil-bridge.service` 单元运行的是同一个二进制文件（仅限回环地址）。完整的请求/响应契约见 [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md)。
 
-**诚实说明——今天实际运行的内容：** `route --mode real|simulation --joint 名称 --position 数值 [--collision-risk] [--distance 米数] [--transport-latency-ms 毫秒] [--transport-timeout-ms 毫秒] [--transport-disconnected]` 会做出真实的路由决策——`simulation` 模式总是发送，`real` 模式受真实安全联锁约束，只要设置了 `--collision-risk` 就会阻止指令。`mirror --joint 名称 --position 数值` 会无条件镜像一条指令。两者默认都路由到一个内存中的接收器（`RecordingSink`，而非真正的控制器或真正的 HYDRA-UMC-TWIN 实例），如果传入上述传输层参数，则路由到一个真的会失败（超时/断开）的 `SimulatedTransport`——目前还没有 gRPC/WebSocket 传输层。具体已交付内容请参见 [`CHANGELOG.md`](CHANGELOG.md)，尚待完成的内容请参见下方路线图。
+**诚实说明——今天实际运行的内容：** `route --mode real|simulation --joint 名称 --position 数值 [--collision-risk] [--distance 米数] [--transport-latency-ms 毫秒] [--transport-timeout-ms 毫秒] [--transport-disconnected]` 会做出真实的路由决策——`simulation` 模式总是发送，`real` 模式受真实安全联锁约束，只要设置了 `--collision-risk` 就会阻止指令。`mirror --joint 名称 --position 数值` 会无条件镜像一条指令。`serve` 则把两者都以真实的 HTTP JSON 形式对外提供，而不再局限于一次性的 CLI 调用。三者默认都路由到一个内存中的接收器（`RecordingSink`，而非真正的控制器或真正的 HYDRA-UMC-TWIN 实例），如果传入上述传输层参数，则路由到一个真的会失败（超时/断开）的 `SimulatedTransport`——目前还没有 gRPC/WebSocket 传输层。具体已交付内容请参见 [`CHANGELOG.md`](CHANGELOG.md)，每个命令/端点请参见 [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md)，尚待完成的内容请参见下方路线图。
 
 ---
 
@@ -147,8 +148,25 @@ run.bat
 且有意义的结果，不是错误），输入无效时为 `2`，传输失败时为 `3`
 （联锁放行了指令，但投递未被确认）。`mirror` 退出码为 `0`、`2` 或 `3`。
 
-`Cargo.toml` 目前刻意不包含任何外部 crate——具体在真正的 gRPC/WebSocket
-传输层工作开始时会添加什么，请见其内部的注释说明。
+同样的路由/镜像逻辑，也可以通过真实的 HTTP JSON 访问：
+
+```bash
+./run.sh serve --addr 127.0.0.1 --port 8113
+# [hil-bridge] HTTP API listening on 127.0.0.1:8113
+# [hil-bridge] POST /route, POST /mirror, GET /stats
+
+curl -X POST http://127.0.0.1:8113/route \
+    -d '{"mode":"real","joint":"shoulder","position":1.0,"risk":{"collision_imminent":true,"distance_m":0.02}}'
+# {"BlockedByInterlock":{"reason":"twin reports imminent collision at 0.020m"}}
+```
+
+完整的 `POST /route`/`POST /mirror`/`GET /stats` 请求/响应契约见
+[`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md)——这与部署到 CM5 上的
+`systemd/hydra-umc-hil-bridge.service` 单元运行的是同一个二进制文件。
+
+`Cargo.toml` 目前刻意不包含真实 HTTP JSON 接口所需的
+`tiny_http`/`serde`/`serde_json` 之外的任何外部 crate——具体在真正的
+gRPC/WebSocket 传输层工作开始时还会添加什么，请见其内部的注释说明。
 
 ---
 
@@ -249,6 +267,7 @@ run.bat
 
 ## 📚 文档与社区
 
+- **[docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md)** — 每一个 `route`/`mirror`/`serve` 调用、从真实构建的发布版二进制文件中获取的真实输出、退出码表，以及 `POST /route`/`POST /mirror`/`GET /stats` HTTP JSON 契约。
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** —— 提交 Pull Request 所需的技术栈和编码规范。
 - **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)** —— 本社区所期望的行为准则。
 - **[SECURITY.md](SECURITY.md)** —— 如何报告漏洞，以及本项目真实的安全关注重点。

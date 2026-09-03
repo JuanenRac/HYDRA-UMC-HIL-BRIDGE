@@ -21,7 +21,7 @@ Bare invocation (no arguments) prints identity/version/role and exits `0`:
 
 ```
 $ hydra-umc-hil-bridge
-HYDRA-UMC-HIL-BRIDGE v0.0.3
+HYDRA-UMC-HIL-BRIDGE v0.0.5
 Hardware-in-the-loop interface for real-vs-virtual command syncing with the Digital Twin.
 ```
 
@@ -130,6 +130,51 @@ delivered (exit `3`) — `mirror` doesn't currently expose the
 `--transport-*` flags to provoke that path from the CLI, but the underlying
 `bridge.mirror_command` returns the same `Result` that `route`'s handling
 above demonstrates.
+
+### `serve [--addr ADDR] [--port PORT]`
+
+Starts a real, blocking HTTP JSON server (`src/server.rs`, `tiny_http`, no
+async runtime) that exposes the exact same `Bridge::route_command()`/
+`Bridge::mirror_command()` logic the `route`/`mirror` subcommands run above
+— this closes the "only reachable as a one-shot CLI invocation" gap, not
+the still-deferred real gRPC/WebSocket transport question. `ADDR` defaults
+to `127.0.0.1`, `PORT` to `8113`. This is the same binary the
+`systemd/hydra-umc-hil-bridge.service` unit runs on a deployed CM5
+(`hydra-umc-hil-bridge serve --addr 127.0.0.1 --port 8113`, loopback-only).
+
+```
+$ hydra-umc-hil-bridge serve --addr 127.0.0.1 --port 8113
+[hil-bridge] HTTP API listening on 127.0.0.1:8113
+[hil-bridge] POST /route, POST /mirror, GET /stats
+```
+
+**`POST /route`** — same fields as the CLI's `route` flags, as JSON:
+
+```bash
+$ curl -X POST http://127.0.0.1:8113/route \
+    -d '{"mode":"real","joint":"shoulder","position":1.0,"risk":{"collision_imminent":true,"distance_m":0.02}}'
+{"BlockedByInterlock":{"reason":"twin reports imminent collision at 0.020m"}}
+```
+
+`mode` is `"real"` or `"simulation"`; `risk` (optional) mirrors
+`--collision-risk --distance`; `transport` (optional object with
+`disconnected`/`latency_ms`/`timeout_ms`) mirrors the CLI's
+`--transport-*` flags. The response body is the real `RouteOutcome` enum
+serialized as JSON (`SentReal`, `SentSimulation`,
+`BlockedByInterlock { reason }`, or `TransportFailure { reason }`) — always
+HTTP `200` when the request itself was well-formed; `400` on malformed
+JSON.
+
+**`POST /mirror`** — `{"joint": "elbow", "position": -0.3}`, responds
+`{"mirrored": true}` or `{"mirrored": false, "error": "..."}`, both `200`;
+`400` on malformed JSON.
+
+**`GET /stats`** — `{"role": "Hardware-in-the-loop real-vs-virtual command bridge"}`, `200`.
+
+Any other path, or any non-`POST` request to `/route`/`/mirror`, is `404`.
+There is no authentication - same as every other loopback-only internal API
+on the CM5 (see the systemd unit's own `RestrictAddressFamilies`/
+`ProtectSystem` hardening for what it relies on instead).
 
 ## Exit codes
 

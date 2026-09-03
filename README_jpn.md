@@ -34,8 +34,9 @@
 * ⚡ **ゼロレイテンシーミラーリング（部分的）：** 実際の `mirror` サブコマンドは、今日はコマンドをメモリ内の記録用シンクへミラーリングします。実際のネットワーク接続上での「ゼロレイテンシー」はまだ今後の課題です。
 * 📡 **統一プロトコル（計画中）：** 高速なローカル同期には gRPC を、リモート監視には WebSocket を使用します——意図的に、まだどのネットワークトランスポートも接続されていません（`Cargo.toml` を参照）。
 * 🧪 **ハードウェアなしでテスト可能なフェイルセーフ・トランスポート（v0）：** `CommandSink::send()` は今では実際の `Result` を返し、`SimulatedTransport` はタイムアウトまたは切断されたリンクをモデル化できます。ブリッジはコマンドが実際には届いていないのに届いたと主張することは決してなく、独立した `TransportFailure` という結果を報告します——`route` の `--transport-latency-ms`/`--transport-timeout-ms`/`--transport-disconnected` で実際に発生させて確認できます。
+* 🌐 **HTTP JSON API（v0）：** `serve [--addr ADDR] [--port PORT]`（デフォルト `127.0.0.1:8113`）は、同じルーティング/ミラーリングロジックを実際のブロッキング `tiny_http` サーバー経由で `POST /route`、`POST /mirror`、`GET /stats` として公開します——デプロイされた CM5 の `systemd/hydra-umc-hil-bridge.service` ユニットが実行するのと同じバイナリです（ループバックのみ）。完全なリクエスト/レスポンス契約は [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) を参照してください。
 
-**正直な現状確認 —— 今日実際に動くもの：** `route --mode real|simulation --joint 名前 --position 値 [--collision-risk] [--distance メートル] [--transport-latency-ms MS] [--transport-timeout-ms MS] [--transport-disconnected]` は実際のルーティング判断を行います——`simulation` モードは常に送信し、`real` モードは `--collision-risk` が指定されるたびにコマンドをブロックする実際の安全インターロックの対象になります。`mirror --joint 名前 --position 値` はコマンドを無条件にミラーリングします。どちらも既定ではメモリ内の受信先（`RecordingSink`、実際のコントローラーや実際の HYDRA-UMC-TWIN インスタンスではない）へルーティングされ、上記のトランスポートフラグが渡された場合は実際に失敗しうる（タイムアウト/切断）`SimulatedTransport` へルーティングされます——まだ gRPC/WebSocket トランスポートは存在しません。実際に出荷済みの内容は [`CHANGELOG.md`](CHANGELOG.md) を、まだ残っている作業は下記のロードマップを参照してください。
+**正直な現状確認 —— 今日実際に動くもの：** `route --mode real|simulation --joint 名前 --position 値 [--collision-risk] [--distance メートル] [--transport-latency-ms MS] [--transport-timeout-ms MS] [--transport-disconnected]` は実際のルーティング判断を行います——`simulation` モードは常に送信し、`real` モードは `--collision-risk` が指定されるたびにコマンドをブロックする実際の安全インターロックの対象になります。`mirror --joint 名前 --position 値` はコマンドを無条件にミラーリングします。`serve` は、一度きりの CLI 呼び出しの代わりに、両方を実際の HTTP JSON 経由でも公開します。3つとも既定ではメモリ内の受信先（`RecordingSink`、実際のコントローラーや実際の HYDRA-UMC-TWIN インスタンスではない）へルーティングされ、上記のトランスポートフラグが渡された場合は実際に失敗しうる（タイムアウト/切断）`SimulatedTransport` へルーティングされます——まだ gRPC/WebSocket トランスポートは存在しません。実際に出荷済みの内容は [`CHANGELOG.md`](CHANGELOG.md) を、すべてのコマンド/エンドポイントは [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) を、まだ残っている作業は下記のロードマップを参照してください。
 
 ---
 
@@ -155,9 +156,29 @@ run.bat
 `2`、または `3` で
 終了します。
 
-`Cargo.toml` は今のところ意図的に外部クレートを一切含んでいません——
-実際の gRPC/WebSocket トランスポート作業が始まった際に何が追加される
-かについては、その内部のコメントを参照してください。
+同じルーティング/ミラーリングロジックは、実際の HTTP JSON 経由でも
+到達できます：
+
+```bash
+./run.sh serve --addr 127.0.0.1 --port 8113
+# [hil-bridge] HTTP API listening on 127.0.0.1:8113
+# [hil-bridge] POST /route, POST /mirror, GET /stats
+
+curl -X POST http://127.0.0.1:8113/route \
+    -d '{"mode":"real","joint":"shoulder","position":1.0,"risk":{"collision_imminent":true,"distance_m":0.02}}'
+# {"BlockedByInterlock":{"reason":"twin reports imminent collision at 0.020m"}}
+```
+
+完全な `POST /route`/`POST /mirror`/`GET /stats` リクエスト/レスポンス
+契約は [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) を参照してくだ
+さい——これはデプロイされた CM5 の
+`systemd/hydra-umc-hil-bridge.service` ユニットが実行するのと同じバイ
+ナリです。
+
+`Cargo.toml` は今のところ意図的に、実際の HTTP JSON サーフェスに使う
+`tiny_http`/`serde`/`serde_json` 以外の外部クレートを含んでいません
+——実際の gRPC/WebSocket トランスポート作業が始まった際に他に何が
+追加されるかについては、その内部のコメントを参照してください。
 
 ---
 
@@ -258,6 +279,7 @@ run.bat
 
 ## 📚 ドキュメント & コミュニティ
 
+- **[docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md)** — すべての `route`/`mirror`/`serve` 呼び出し、ビルド済みリリースバイナリから実際に取得した出力、終了コード表、そして `POST /route`/`POST /mirror`/`GET /stats` の HTTP JSON 契約。
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** —— プルリクエストのための技術スタックとコーディング指針。
 - **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)** —— このコミュニティで期待される行動規範。
 - **[SECURITY.md](SECURITY.md)** —— 脆弱性の報告方法と、このプロジェクトの実際のセキュリティ重点領域。
