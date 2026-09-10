@@ -22,8 +22,7 @@ semantic-versioning judgment calls:
 ## Unreleased - Simulated transport ordering evidence
 
 - **`GET /stats` now reports real process-lifetime counters** (new
-  `Stats` struct in `server.rs`) - found in an ecosystem-wide
-  software-improvements audit: it used to return a hardcoded static JSON
+  `Stats` struct in `server.rs`): it used to return a hardcoded static JSON
   body, since each request built a fresh `Bridge`/`RecordingSink` with
   nothing persistent to aggregate. Tracks real routed/blocked/transport-
   failure/mirror/malformed/not-found counts across the server's own
@@ -89,7 +88,7 @@ semantic-versioning judgment calls:
 - Real verification beyond the test suite: ran `route`/`mirror` for all 4 real outcomes (real-mode sent, real-mode blocked, simulation-mode sent ungated despite risk, mirrored) and confirmed each printed message and exit code.
 
 ### Fixed
-- `build.sh` called `bump_manifest_version.py` (no `--sync`) as its very first line, before also calling `bump_version.py` later - the same double-bump pattern found in other Rust projects this session. Rewritten to bump the native version first, then sync the manifest. `build.sh`/`build.bat` now also run `cargo test` and use the ecosystem's no-autoclose pattern for the first time in this project; `run.sh`/`run.bat` now forward arguments.
+- `build.sh` called `bump_manifest_version.py` (no `--sync`) as its very first line, before also calling `bump_version.py` later - the same double-bump pattern seen in other Rust projects in the ecosystem. Rewritten to bump the native version first, then sync the manifest. `build.sh`/`build.bat` now also run `cargo test` and use the ecosystem's no-autoclose pattern for the first time in this project; `run.sh`/`run.bat` now forward arguments.
 
 ## [0.0.1] - Initial scaffolding
 
