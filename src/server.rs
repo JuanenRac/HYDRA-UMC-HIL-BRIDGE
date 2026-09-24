@@ -25,6 +25,11 @@ fn json_header() -> Header {
     Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap()
 }
 
+fn header(name: &str, value: &str) -> tiny_http::Header {
+    tiny_http::Header::from_bytes(name.as_bytes(), value.as_bytes())
+        .expect("static header names and values are valid")
+}
+
 fn write_json(request: tiny_http::Request, status: u16, body: &serde_json::Value) {
     let text = body.to_string();
     let response = Response::from_string(text)
@@ -191,7 +196,16 @@ fn handle_route(request: tiny_http::Request, raw: &str, stats: &mut Stats) {
         RouteOutcome::BlockedByInterlock { .. } => stats.blocked_by_interlock += 1,
         RouteOutcome::TransportFailure { .. } => stats.transport_failures += 1,
     }
-    write_json(request, 200, &serde_json::to_value(&outcome).unwrap());
+    eprintln!("{}", outcome.log_line(req.mode));
+    let response = Response::from_string(serde_json::to_value(&outcome).unwrap().to_string())
+        .with_status_code(200)
+        .with_header(json_header())
+        .with_header(header("X-Outcome-Kind", outcome.kind()))
+        .with_header(header(
+            "X-Delivered",
+            if outcome.delivered() { "true" } else { "false" },
+        ));
+    let _ = request.respond(response);
 }
 
 fn handle_mirror(request: tiny_http::Request, raw: &str, stats: &mut Stats) {

@@ -131,6 +131,46 @@ pub enum RouteOutcome {
     },
 }
 
+impl RouteOutcome {
+    /// A stable, machine-readable name for what happened - the same three
+    /// things a caller must never confuse: a command that was only
+    /// simulated, one that was blocked on purpose, and one that failed to
+    /// be delivered.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            RouteOutcome::SentReal => "sent_real",
+            RouteOutcome::SentSimulation => "sent_simulation",
+            RouteOutcome::BlockedByInterlock { .. } => "blocked_by_interlock",
+            RouteOutcome::TransportFailure { .. } => "transport_failure",
+        }
+    }
+
+    /// True only when a transport really accepted the command. A simulated
+    /// send reached the twin, not the machine, so it is `true` here and
+    /// `kind()` is what says which one it was.
+    pub fn delivered(&self) -> bool {
+        matches!(self, RouteOutcome::SentReal | RouteOutcome::SentSimulation)
+    }
+
+    /// One operational log line: mode, kind, delivery and the reason if any.
+    pub fn log_line(&self, mode: Mode) -> String {
+        let reason = match self {
+            RouteOutcome::BlockedByInterlock { reason }
+            | RouteOutcome::TransportFailure { reason } => {
+                format!(" reason={reason:?}")
+            }
+            _ => String::new(),
+        };
+        format!(
+            "[hil-bridge] route mode={:?} kind={} delivered={}{}",
+            mode,
+            self.kind(),
+            self.delivered(),
+            reason
+        )
+    }
+}
+
 pub struct Bridge {
     pub mode: Mode,
 }
@@ -206,6 +246,35 @@ mod tests {
             joint: joint.to_string(),
             position,
         }
+    }
+
+    #[test]
+    fn the_three_easily_confused_outcomes_have_distinct_kinds() {
+        let sim = RouteOutcome::SentSimulation;
+        let blocked = RouteOutcome::BlockedByInterlock { reason: "x".into() };
+        let failed = RouteOutcome::TransportFailure { reason: "y".into() };
+        assert_eq!(sim.kind(), "sent_simulation");
+        assert_eq!(blocked.kind(), "blocked_by_interlock");
+        assert_eq!(failed.kind(), "transport_failure");
+        assert!(sim.delivered());
+        assert!(!blocked.delivered());
+        assert!(!failed.delivered());
+        assert_eq!(RouteOutcome::SentReal.kind(), "sent_real");
+    }
+
+    #[test]
+    fn the_log_line_names_mode_kind_delivery_and_reason() {
+        let line = RouteOutcome::BlockedByInterlock {
+            reason: "collision".into(),
+        }
+        .log_line(Mode::Real);
+        assert!(line.contains("mode=Real"));
+        assert!(line.contains("kind=blocked_by_interlock"));
+        assert!(line.contains("delivered=false"));
+        assert!(line.contains("collision"));
+        assert!(!RouteOutcome::SentSimulation
+            .log_line(Mode::Simulation)
+            .contains("reason="));
     }
 
     #[test]

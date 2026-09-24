@@ -117,6 +117,7 @@ fn run_route(args: &[String]) -> ExitCode {
     };
     let mut sim_sink = RecordingSink::default();
     let outcome = bridge.route_command(command, risk, real_sink, &mut sim_sink);
+    eprintln!("{}", outcome.log_line(bridge.mode));
 
     match outcome {
         RouteOutcome::SentReal => {
