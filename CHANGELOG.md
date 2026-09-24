@@ -34,6 +34,14 @@ semantic-versioning judgment calls:
   future network transport has that guarantee: a real transport must provide
   its own sequence and acknowledgement evidence before hardware validation.
 
+## [0.0.6] - Simulated, blocked and failed-delivery outcomes are named everywhere
+
+- Every routed command now reports a stable outcome kind (`sent_real`,
+  `sent_simulation`, `blocked_by_interlock`, `transport_failure`) and whether it was
+  delivered: as `X-Outcome-Kind` and `X-Delivered` headers on the HTTP route response
+  and as one operational log line per command (mode, kind, delivery, reason). The JSON
+  body is unchanged. Two new tests.
+
 ## [0.0.5]
 
 - **Fixed CI**: `cargo fmt --check` was failing on `src/bridge.rs`/
