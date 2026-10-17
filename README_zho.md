@@ -4,7 +4,7 @@
 
 # 🌉 HYDRA-UMC-HIL-BRIDGE
 
-<p align="center"><a href="README.md">🇺🇸 English</a> | <a href="README_spa.md">🇪🇸 Español</a> | <a href="README_fra.md">🇫🇷 Français</a> | <a href="README_ita.md">🇮🇹 Italiano</a> | <a href="README_deu.md">🇩🇪 Deutsch</a> | 🇨🇳 <b>简体中文</b> | <a href="README_jpn.md">🇯🇵 日本語</a></p>
+<p align="center"><a href="README.md">🇺🇸 English</a> | <a href="README_spa.md">🇪🇸 Español</a> | <a href="README_fra.md">🇫🇷 Français</a> | <a href="README_ita.md">🇮🇹 Italiano</a> | <a href="README_deu.md">🇩🇪 Deutsch</a> | 🇨🇳 <b>简体中文</b> | <a href="README_jpn.md">🇯🇵 日本語</a> | <a href="README_por.md">🇵🇹 Português</a></p>
 
 ### ⚡ 用于真实与虚拟同步的硬件在环接口
 
@@ -28,6 +28,7 @@
 
 ### 关键特性：
 * 🛡️ **安全联锁（v0）：** 真实的 `route` 子命令会在孪生系统的风险报告指出碰撞即将发生时，阻止发往真实硬件的指令——下方"诚实说明"给出了今天到底能跑什么。
+* 🧯 **联锁采用故障关闭（v0）：** 在 `real` 模式下，只有带有表明路径畅通的孪生风险报告时才会转发命令：没有报告就会被阻止（以前省略报告等于“无碰撞”，足以到达硬件），距离为 NaN 会被阻止，即使孪生没有设置 `collision_imminent`，间隙不足 5 厘米也会被阻止（`MIN_CLEARANCE_M`）。`--clear-distance 米数` 可向 CLI 提供畅通报告；超过 16 KB 的请求体会被以 `413` 拒绝。在孪生传输实现之前，调用方在同一请求中发送的报告仍只是调用方的一面之词。*（已实现）*
 * 🌉 **双向桥接（v0，尚无传输层）：** 真实的、基于模式（真实/仿真）的路由和真实的、无条件的镜像已经存在；目前还没有连接到真正的 HYDRA-UMC-TWIN 或 HYDRA-UMC 控制器的真实 gRPC/WebSocket 连接。
 * ⚡ **零延迟镜像（部分）：** 真实的 `mirror` 子命令今天会把指令镜像到一个内存中的记录接收器；在真实网络连接上的"零延迟"仍是未来工作。
 * 📡 **统一协议（计划中）：** 使用 gRPC 进行高速本地同步，使用 WebSocket 进行远程监控——目前故意还没有接入任何网络传输层（见 `Cargo.toml`）。
@@ -62,7 +63,7 @@ flowchart LR
 * **为何本桥接服务没有 `hardware/`/`firmware/`/`os/` 文件夹。** 纯软件——它将现有硬件（真实应用程序、真实的 HYDRA-UMC 固件）桥接到数字孪生系统，没有自己的板卡。
 * **为何它是 HYDRA-UMC-TWIN 的兄弟项目，而非子模块。** 硬件在环桥接需要持续运行（并保持真实设备指令的持续流动），独立于 HYDRA-UMC-TWIN 自身的渲染/物理循环在那一刻正在做什么——作为独立进程意味着孪生系统的重启不会丢弃正在传输中的真实指令。
 * **这如何融入生态系统的其余部分。** 使 HYDRA-UMC-SUITE、HYDRA-UMC-ANDROID-CONTROL 和 HYDRA-UMC-IOS-CONTROL 能够像控制一个真实的、由 HYDRA-UMC-SERVER 支撑的单元一样控制 HYDRA-UMC-TWIN——同一个控制界面，一个模拟的目标。
-* **为何联锁信任孪生系统自身的 `collision_imminent` 标志，而不是从距离阈值重新推导一个。** 孪生系统在报告风险时已经完成了真实的几何/物理推理——在这里用一个独立的距离阈值去质疑那个结论，只会得到第二个、可能不一致的安全意见。具体这如何呼应 HYDRA-UMC-SAFETY-ZONES 的检测-执行边界，见 `interlock.rs` 自身的模块文档。
+* **为什么联锁信任孪生自己的 `collision_imminent` 标志，同时仍增加最小间隙并采用故障关闭。** 孪生在报告风险时已经完成了真正的几何/物理推理，所以桥接器不会重新推导碰撞；但孪生在一毫米处说“无碰撞”、距离为 NaN 或根本没有报告，都不能说明路径畅通，因此会阻止命令（`MIN_CLEARANCE_M` = 5 厘米，这是保守的下限而不是认证距离：那由固件负责）。关于这如何对应 HYDRA-UMC-SAFETY-ZONES 的检测与执行边界，请参阅 `interlock.rs` 的模块文档。
 * **为何 `Simulation` 模式永远不受联锁约束。** 把指令路由到孪生系统而非真实硬件的全部意义，就在于能够安全地看到预测的碰撞真实发生——如果在那里阻止它，就违背了这个功能本身存在的意义。
 * **为何 `CommandSink` 今天只是一个只有内存实现 `RecordingSink` 的 trait。** 目前还没有真正的 gRPC/WebSocket 传输层（见 `Cargo.toml` 自身的注释）——`RecordingSink` 对此很诚实：它只记录被要求发送的内容，不会向任何地方传输，与 HYDRA-UMC-SAFETY-ZONES 中 `NullEStopRequester` 的思路完全相同。
 * **为何 `CommandSink::send()` 返回 `Result` 而非 `()`。** 无论联锁是否放行了该指令，真实传输层都可能送达失败（超时、断开）——如果 `send()` 不能失败，桥接服务就无法避免在指令从未真正到达时仍宣称成功。`SimulatedTransport` 存在的意义正是让这条失败路径在今天就是真实且可测试的，而不必等到真实传输层出现。
@@ -108,7 +109,7 @@ HYDRA-UMC-HIL-BRIDGE/
 
 ```bash
 # Linux / macOS
-./build.sh   # 里程表式版本递增、`cargo test`（24 个测试），然后执行 `cargo build --release`
+./build.sh   # 里程表式版本递增、`cargo test`（35 个测试），然后执行 `cargo build --release`
 ./run.sh     # 运行 target/release/hydra-umc-hil-bridge，打印名称 + 版本 + 角色
 ```
 
@@ -125,8 +126,11 @@ run.bat
 真实的 `route` 和 `mirror` 子命令：
 
 ```bash
-./run.sh route --mode real --joint shoulder --position 0.5
+./run.sh route --mode real --joint shoulder --position 0.5 --clear-distance 2.0
 # SENT: routed to real HYDRA-UMC controller
+
+./run.sh route --mode real --joint shoulder --position 0.5
+# BLOCKED: safety interlock refused to forward to real hardware (no twin risk report: a real command is not forwarded without one)
 
 ./run.sh route --mode real --joint shoulder --position 0.5 --collision-risk --distance 0.02
 # BLOCKED: safety interlock refused to forward to real hardware (twin reports imminent collision at 0.020m)

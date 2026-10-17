@@ -82,6 +82,18 @@ fn run_route(args: &[String]) -> ExitCode {
             collision_imminent: true,
             distance_m,
         })
+    } else if let Some(text) = find_flag(args, "--clear-distance") {
+        // a twin report that says the path is clear, with this much clearance (the real mode refuses to forward without a report)
+        match text.parse::<f64>() {
+            Ok(distance_m) => Some(TwinRiskReport {
+                collision_imminent: false,
+                distance_m,
+            }),
+            Err(_) => {
+                eprintln!("route: --clear-distance must be a number of meters, got '{text}'");
+                return ExitCode::from(2);
+            }
+        }
     } else {
         None
     };

@@ -4,7 +4,7 @@
 
 # 🌉 HYDRA-UMC-HIL-BRIDGE
 
-<p align="center">🇺🇸 <b>English</b> | <a href="README_spa.md">🇪🇸 Español</a> | <a href="README_fra.md">🇫🇷 Français</a> | <a href="README_ita.md">🇮🇹 Italiano</a> | <a href="README_deu.md">🇩🇪 Deutsch</a> | <a href="README_zho.md">🇨🇳 简体中文</a> | <a href="README_jpn.md">🇯🇵 日本語</a></p>
+<p align="center">🇺🇸 <b>English</b> | <a href="README_spa.md">🇪🇸 Español</a> | <a href="README_fra.md">🇫🇷 Français</a> | <a href="README_ita.md">🇮🇹 Italiano</a> | <a href="README_deu.md">🇩🇪 Deutsch</a> | <a href="README_zho.md">🇨🇳 简体中文</a> | <a href="README_jpn.md">🇯🇵 日本語</a> | <a href="README_por.md">🇵🇹 Português</a></p>
 
 ### ⚡ Hardware-in-the-Loop Interface for Real-vs-Virtual Sync
 
@@ -25,6 +25,7 @@ It allows developers to send commands from any interface (App, Suite, Studio) to
 
 ### Key Features:
 * 🛡️ **Safety Interlock (v0):** the real `route` subcommand blocks a real-hardware-bound command whenever a twin risk report says a collision is imminent - see "Honesty check" below for exactly what runs today.
+* 🧯 **The interlock fails closed (v0):** in `real` mode a command is forwarded only with a twin risk report that says the path is clear: no report blocks it (omitting it used to default to "no collision", which was enough to reach the hardware), a NaN distance blocks it, and so does less than 5 cm of clearance even when the twin did not raise `collision_imminent` (`MIN_CLEARANCE_M`). `--clear-distance METERS` supplies a clear report to the CLI; request bodies over 16 KB are refused with `413`. A report that the caller sends in the same request is still the caller's word until the twin transport exists. *(implemented)*
 * 🌉 **Bidirectional Bridge (v0, no transport yet):** real mode-based routing (Real/Simulation) and real unconditional mirroring exist; there is no real gRPC/WebSocket connection to an actual HYDRA-UMC-TWIN or HYDRA-UMC controller yet.
 * ⚡ **Zero-Latency Mirroring (partial):** the real `mirror` subcommand shadows a command into a recording sink today; "zero-latency" over a real network connection is still future work.
 * 📡 **Unified Protocol (planned):** uses gRPC for high-speed local sync and WebSockets for remote monitoring - no network transport is wired in yet, on purpose (see `Cargo.toml`).
@@ -60,7 +61,7 @@ flowchart LR
 * **Why this bridge has no `hardware/`/`firmware/`/`os/` folders.** Pure software - it bridges existing hardware (real apps, real HYDRA-UMC firmware) to the digital twin, no board of its own.
 * **Why it's a sibling, not a submodule, of HYDRA-UMC-TWIN.** A hardware-in-the-loop bridge needs to keep running (and keep a real device's commands flowing) independent of whatever HYDRA-UMC-TWIN's own render/physics loop is doing at that instant - a separate process means a twin restart doesn't drop an in-flight real command.
 * **How this fits the rest of the ecosystem.** Lets HYDRA-UMC-SUITE, HYDRA-UMC-ANDROID-CONTROL and HYDRA-UMC-IOS-CONTROL control HYDRA-UMC-TWIN as if it were a real HYDRA-UMC-SERVER-backed cell - the same control surface, a simulated target.
-* **Why the interlock trusts the twin's own `collision_imminent` flag instead of re-deriving one from a distance threshold.** The twin has already done the real geometric/physics reasoning by the time it reports risk - second-guessing that conclusion here with an independent distance cutoff would just be a second, possibly-inconsistent safety opinion. See `interlock.rs`'s own module docs for how this mirrors HYDRA-UMC-SAFETY-ZONES's detect-vs-enforce boundary.
+* **Why the interlock trusts the twin's own `collision_imminent` flag, and still adds a minimum clearance and fails closed.** The twin has already done the real geometric/physics reasoning by the time it reports risk, so the bridge does not re-derive collisions; but a twin that says "no collision" at one millimetre, a NaN distance, or no report at all is not a statement that the path is clear, so those block the command (`MIN_CLEARANCE_M` = 5 cm, a conservative floor and not a certified distance: the firmware owns that). See `interlock.rs`'s own module docs for how this mirrors HYDRA-UMC-SAFETY-ZONES's detect-vs-enforce boundary.
 * **Why `Simulation` mode is never gated by the interlock.** The entire point of routing a command to the twin instead of real hardware is to be able to see a predicted collision play out safely - blocking it there would defeat the feature it exists to support.
 * **Why `CommandSink` is a trait with only an in-memory `RecordingSink` implementation today.** No real gRPC/WebSocket transport exists yet (see `Cargo.toml`'s own comment) - `RecordingSink` is honest about that: it records what it was asked to send without transmitting anywhere, the same reasoning as `NullEStopRequester` in HYDRA-UMC-SAFETY-ZONES.
 * **Why `CommandSink::send()` returns a `Result` instead of `()`.** A real transport can fail to deliver (timeout, disconnect) independently of whether the interlock allowed the command through - if `send()` can't fail, the bridge has no way to avoid claiming success on a command that never actually arrived. `SimulatedTransport` exists specifically so that failure path is real and testable today, without waiting for a real transport to exist.
@@ -105,7 +106,7 @@ Requires the Rust toolchain (`cargo`/`rustc`, install via [rustup](https://rustu
 
 ```bash
 # Linux / macOS
-./build.sh   # odometer version bump, `cargo test` (24 tests), then `cargo build --release`
+./build.sh   # odometer version bump, `cargo test` (35 tests), then `cargo build --release`
 ./run.sh     # runs target/release/hydra-umc-hil-bridge, prints name + version + role
 ```
 
@@ -120,8 +121,11 @@ run.bat
 The real `route` and `mirror` subcommands:
 
 ```bash
-./run.sh route --mode real --joint shoulder --position 0.5
+./run.sh route --mode real --joint shoulder --position 0.5 --clear-distance 2.0
 # SENT: routed to real HYDRA-UMC controller
+
+./run.sh route --mode real --joint shoulder --position 0.5
+# BLOCKED: safety interlock refused to forward to real hardware (no twin risk report: a real command is not forwarded without one)
 
 ./run.sh route --mode real --joint shoulder --position 0.5 --collision-risk --distance 0.02
 # BLOCKED: safety interlock refused to forward to real hardware (twin reports imminent collision at 0.020m)

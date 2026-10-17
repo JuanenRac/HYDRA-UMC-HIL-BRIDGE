@@ -38,13 +38,24 @@ fn write_json(request: tiny_http::Request, status: u16, body: &serde_json::Value
     let _ = request.respond(response);
 }
 
+/// The largest request body this surface reads. Every request here is a few hundred bytes of JSON; reading without a limit let anything that could reach the port make the process
+/// allocate as much memory as it was sent.
+const MAX_BODY_BYTES: u64 = 16 * 1024;
+
 fn read_body(request: &mut tiny_http::Request) -> std::io::Result<String> {
-    // as_reader() returns `&mut dyn Read` - a trait object, so the method
-    // call below resolves via dynamic dispatch and needs no local
-    // `use std::io::Read` (only calling through a generic `T: Read`
-    // bound would).
+    use std::io::Read;
+    // one byte more than the limit, so "exactly the limit" is accepted and "over" is detected
     let mut raw = String::new();
-    request.as_reader().read_to_string(&mut raw)?;
+    request
+        .as_reader()
+        .take(MAX_BODY_BYTES + 1)
+        .read_to_string(&mut raw)?;
+    if raw.len() as u64 > MAX_BODY_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("request body is larger than {MAX_BODY_BYTES} bytes"),
+        ));
+    }
     Ok(raw)
 }
 
@@ -130,9 +141,14 @@ pub fn run(server: Server) {
             Ok(raw) => raw,
             Err(e) => {
                 stats.malformed_requests += 1;
+                let status = if e.kind() == std::io::ErrorKind::InvalidData {
+                    413
+                } else {
+                    400
+                };
                 write_json(
                     request,
-                    400,
+                    status,
                     &json!({"error": format!("could not read request body: {e}")}),
                 );
                 continue;
@@ -301,10 +317,47 @@ mod tests {
     #[test]
     fn route_real_mode_no_risk_is_sent_real() {
         let port = start_test_server();
-        let body = r#"{"mode":"real","joint":"shoulder","position":1.0}"#;
+        let body = r#"{"mode":"real","joint":"shoulder","position":1.0,"risk":{"collision_imminent":false,"distance_m":2.0}}"#;
         let (status, resp) = post(port, "/route", body);
         assert_eq!(status, 200);
         assert!(resp.contains("SentReal"));
+    }
+
+    #[test]
+    fn route_real_mode_without_a_twin_report_is_blocked() {
+        let port = start_test_server();
+        let body = r#"{"mode":"real","joint":"shoulder","position":1.0}"#;
+        let (status, resp) = post(port, "/route", body);
+        assert_eq!(status, 200);
+        assert!(resp.contains("BlockedByInterlock"));
+        assert!(resp.contains("no twin risk report"));
+    }
+
+    #[test]
+    fn route_real_mode_with_a_tiny_clearance_is_blocked_even_without_the_imminent_flag() {
+        let port = start_test_server();
+        let body = r#"{"mode":"real","joint":"shoulder","position":1.0,"risk":{"collision_imminent":false,"distance_m":0.001}}"#;
+        let (status, resp) = post(port, "/route", body);
+        assert_eq!(status, 200);
+        assert!(resp.contains("BlockedByInterlock"));
+    }
+
+    #[test]
+    fn an_oversized_body_is_refused_with_413_and_the_server_keeps_serving() {
+        let port = start_test_server();
+        let big = format!(
+            r#"{{"mode":"simulation","joint":"{}","position":1.0}}"#,
+            "a".repeat(20_000)
+        );
+        let (status, _) = post(port, "/route", &big);
+        assert_eq!(status, 413);
+        let (status, resp) = post(
+            port,
+            "/route",
+            r#"{"mode":"simulation","joint":"shoulder","position":1.0}"#,
+        );
+        assert_eq!(status, 200);
+        assert!(resp.contains("SentSimulation"));
     }
 
     #[test]
@@ -328,7 +381,7 @@ mod tests {
     #[test]
     fn route_reports_transport_failure_when_disconnected() {
         let port = start_test_server();
-        let body = r#"{"mode":"real","joint":"shoulder","position":1.0,"transport":{"disconnected":true}}"#;
+        let body = r#"{"mode":"real","joint":"shoulder","position":1.0,"risk":{"collision_imminent":false,"distance_m":2.0},"transport":{"disconnected":true}}"#;
         let (status, resp) = post(port, "/route", body);
         assert_eq!(status, 200);
         assert!(resp.contains("TransportFailure"));
@@ -372,7 +425,7 @@ mod tests {
         post(
             port,
             "/route",
-            r#"{"mode":"real","joint":"shoulder","position":1.0}"#,
+            r#"{"mode":"real","joint":"shoulder","position":1.0,"risk":{"collision_imminent":false,"distance_m":2.0}}"#,
         );
         post(
             port,
@@ -387,7 +440,7 @@ mod tests {
         post(
             port,
             "/route",
-            r#"{"mode":"real","joint":"shoulder","position":1.0,"transport":{"disconnected":true}}"#,
+            r#"{"mode":"real","joint":"shoulder","position":1.0,"risk":{"collision_imminent":false,"distance_m":2.0},"transport":{"disconnected":true}}"#,
         );
         post(port, "/route", "not json");
         post(port, "/mirror", r#"{"joint":"elbow","position":0.5}"#);

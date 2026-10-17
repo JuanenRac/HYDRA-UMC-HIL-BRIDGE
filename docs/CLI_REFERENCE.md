@@ -27,17 +27,21 @@ Hardware-in-the-loop interface for real-vs-virtual command syncing with the Digi
 
 ## Commands
 
-### `route --mode <real|simulation> --joint NAME --position VALUE [--collision-risk --distance M] [--transport-disconnected | --transport-latency-ms N --transport-timeout-ms N]`
+### `route --mode <real|simulation> --joint NAME --position VALUE [--collision-risk --distance M | --clear-distance M] [--transport-disconnected | --transport-latency-ms N --transport-timeout-ms N]`
 
 Routes one joint command according to `--mode`:
 
 - `simulation` mode always reaches the simulated sink, ungated by the
   interlock.
 - `real` mode is only forwarded to the real sink if the safety interlock
-  allows it. `--collision-risk` (with `--distance METERS`) simulates a
-  `TwinRiskReport` with `collision_imminent: true`; without it, `route`
-  behaves as if no twin risk was reported at all (an honest "allow" default,
-  not a bypass — see `interlock.rs`'s own docs).
+  allows it, and the interlock **fails closed**: it needs a twin risk report
+  that says the path is clear. `--clear-distance METERS` supplies one
+  (`collision_imminent: false` with that clearance); `--collision-risk` (with
+  `--distance METERS`) simulates a `TwinRiskReport` with `collision_imminent:
+  true`. Without either, `route` is **blocked** ("no twin risk report"): not
+  being told about a risk is not the same as there being none. A NaN distance
+  and less than 5 cm of clearance (`MIN_CLEARANCE_M`) are blocked too, even
+  when `collision_imminent` is false — see `interlock.rs`'s own docs.
 - `--transport-disconnected`, or either of
   `--transport-latency-ms`/`--transport-timeout-ms`, swaps the
   always-succeeds sink for a `SimulatedTransport` that can actually miss its
@@ -51,11 +55,18 @@ $ hydra-umc-hil-bridge route --mode simulation --joint j1 --position 0.5
 SENT: routed to HYDRA-UMC-TWIN (simulation)
 ```
 
-**Real mode, no risk reported** — interlock allows, healthy sink, exit `0`:
+**Real mode, twin report says clear** — interlock allows, healthy sink, exit `0`:
+
+```
+$ hydra-umc-hil-bridge route --mode real --joint j1 --position 0.5 --clear-distance 2.0
+SENT: routed to real HYDRA-UMC controller
+
+**Real mode, no report** — blocked, exit `1`:
 
 ```
 $ hydra-umc-hil-bridge route --mode real --joint j1 --position 0.5
-SENT: routed to real HYDRA-UMC controller
+BLOCKED: safety interlock refused to forward to real hardware (no twin risk report: a real command is not forwarded without one)
+```
 ```
 
 **Real mode, imminent collision** — the safety interlock blocks the command
@@ -156,14 +167,17 @@ $ curl -X POST http://127.0.0.1:8113/route \
 {"BlockedByInterlock":{"reason":"twin reports imminent collision at 0.020m"}}
 ```
 
-`mode` is `"real"` or `"simulation"`; `risk` (optional) mirrors
-`--collision-risk --distance`; `transport` (optional object with
+`mode` is `"real"` or `"simulation"`; `risk` mirrors `--collision-risk --distance`
+(`collision_imminent: true`) or `--clear-distance` (`collision_imminent: false`) and is
+**required in real mode**: a real command without one is `BlockedByInterlock` ("no twin risk
+report"), and so is one with a NaN distance or under 5 cm of clearance; in simulation mode it
+is optional. `transport` (optional object with
 `disconnected`/`latency_ms`/`timeout_ms`) mirrors the CLI's
 `--transport-*` flags. The response body is the real `RouteOutcome` enum
 serialized as JSON (`SentReal`, `SentSimulation`,
 `BlockedByInterlock { reason }`, or `TransportFailure { reason }`) — always
 HTTP `200` when the request itself was well-formed; `400` on malformed
-JSON.
+JSON; `413` when the body is larger than 16 KB (it is not read further).
 
 **`POST /mirror`** — `{"joint": "elbow", "position": -0.3}`, responds
 `{"mirrored": true}` or `{"mirrored": false, "error": "..."}`, both `200`;

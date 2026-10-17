@@ -4,7 +4,7 @@
 
 # 🌉 HYDRA-UMC-HIL-BRIDGE
 
-<p align="center"><a href="README.md">🇺🇸 English</a> | 🇪🇸 <b>Español</b> | <a href="README_fra.md">🇫🇷 Français</a> | <a href="README_ita.md">🇮🇹 Italiano</a> | <a href="README_deu.md">🇩🇪 Deutsch</a> | <a href="README_zho.md">🇨🇳 简体中文</a> | <a href="README_jpn.md">🇯🇵 日本語</a></p>
+<p align="center"><a href="README.md">🇺🇸 English</a> | 🇪🇸 <b>Español</b> | <a href="README_fra.md">🇫🇷 Français</a> | <a href="README_ita.md">🇮🇹 Italiano</a> | <a href="README_deu.md">🇩🇪 Deutsch</a> | <a href="README_zho.md">🇨🇳 简体中文</a> | <a href="README_jpn.md">🇯🇵 日本語</a> | <a href="README_por.md">🇵🇹 Português</a></p>
 
 ### ⚡ Interfaz Hardware-in-the-Loop para Sincronización Real vs Virtual
 
@@ -25,6 +25,7 @@ Permite a los desarrolladores enviar comandos desde cualquier interfaz (App, Sui
 
 ### Características Clave:
 * 🛡️ **Enclavamiento de Seguridad (v0):** el subcomando real `route` bloquea un comando destinado a hardware real siempre que un reporte de riesgo del gemelo indique una colisión inminente - ver "Comprobación de honestidad" abajo para lo que funciona hoy exactamente.
+* 🧯 **El interbloqueo falla en cerrado (v0):** en modo `real` un comando solo se reenvía con un informe de riesgo del gemelo que diga que el camino está libre: sin informe se bloquea (omitirlo equivalía a "sin colisión", suficiente para llegar al hardware), una distancia NaN lo bloquea, y también menos de 5 cm de holgura aunque el gemelo no levantara `collision_imminent` (`MIN_CLEARANCE_M`). `--clear-distance METROS` da un informe de camino libre a la CLI; los cuerpos de petición de más de 16 KB se rechazan con `413`. Un informe que el llamante envía en la misma petición sigue siendo palabra del llamante hasta que exista el transporte del gemelo. *(implementado)*
 * 🌉 **Puente Bidireccional (v0, sin transporte todavía):** existe encaminamiento real basado en modo (Real/Simulación) y reflejo (mirroring) real e incondicional; todavía no hay ninguna conexión gRPC/WebSocket real hacia un HYDRA-UMC-TWIN o controlador HYDRA-UMC de verdad.
 * ⚡ **Mirroring de Latencia Cero (parcial):** el subcomando real `mirror` refleja hoy un comando hacia un receptor en memoria; "latencia cero" sobre una conexión de red real sigue siendo trabajo futuro.
 * 📡 **Protocolo Unificado (planeado):** usa gRPC para sincronización local de alta velocidad y WebSockets para monitorización remota - todavía no hay ningún transporte de red conectado, a propósito (ver `Cargo.toml`).
@@ -60,7 +61,7 @@ flowchart LR
 * **Por qué este puente no tiene carpetas `hardware/`/`firmware/`/`os/`.** Software puro - conecta hardware ya existente (apps reales, firmware real de HYDRA-UMC) con el gemelo digital, sin placa propia.
 * **Por qué es hermano, no un submódulo, de HYDRA-UMC-TWIN.** Un puente hardware-in-the-loop necesita seguir funcionando (y seguir dejando fluir los comandos de un dispositivo real) con independencia de lo que esté haciendo en ese instante el propio bucle de renderizado/física de HYDRA-UMC-TWIN - un proceso separado significa que un reinicio del gemelo no descarta un comando real en curso.
 * **Cómo encaja en el resto del ecosistema.** Permite que HYDRA-UMC-SUITE, HYDRA-UMC-ANDROID-CONTROL y HYDRA-UMC-IOS-CONTROL controlen HYDRA-UMC-TWIN como si fuera una célula real respaldada por HYDRA-UMC-SERVER - la misma superficie de control, un objetivo simulado.
-* **Por qué el enclavamiento confía en la propia bandera `collision_imminent` del gemelo en vez de derivar una a partir de un umbral de distancia.** El gemelo ya ha hecho el razonamiento geométrico/físico real en el momento en que reporta el riesgo - cuestionar esa conclusión aquí con un umbral de distancia independiente solo sería una segunda opinión de seguridad, posiblemente inconsistente. Ver la documentación propia del módulo `interlock.rs` para cómo esto refleja el límite detect-vs-enforce de HYDRA-UMC-SAFETY-ZONES.
+* **Por qué el interbloqueo confía en el propio indicador `collision_imminent` del gemelo, y aun así añade una holgura mínima y falla en cerrado.** El gemelo ya ha hecho el razonamiento geométrico/físico real cuando informa del riesgo, así que el puente no vuelve a derivar colisiones; pero un gemelo que dice "sin colisión" a un milímetro, una distancia NaN o la ausencia de informe no son una afirmación de que el camino esté libre, así que bloquean el comando (`MIN_CLEARANCE_M` = 5 cm, un suelo conservador y no una distancia certificada: eso es del firmware). Mira la documentación del módulo `interlock.rs` para ver cómo refleja la frontera detectar-vs-imponer de HYDRA-UMC-SAFETY-ZONES.
 * **Por qué el modo `Simulation` nunca está sujeto al enclavamiento.** Todo el sentido de encaminar un comando hacia el gemelo en vez de hardware real es poder ver una colisión predicha desarrollarse de forma segura - bloquearla ahí anularía la propia función que existe para respaldar.
 * **Por qué `CommandSink` es un trait con solo una implementación en memoria `RecordingSink` hoy.** Todavía no existe ningún transporte gRPC/WebSocket real (ver el propio comentario de `Cargo.toml`) - `RecordingSink` es honesto al respecto: registra lo que se le pidió enviar sin transmitir a ningún sitio, el mismo razonamiento que `NullEStopRequester` en HYDRA-UMC-SAFETY-ZONES.
 * **Por qué `CommandSink::send()` devuelve un `Result` en vez de `()`.** Un transporte real puede fallar en la entrega (timeout, desconexión) con independencia de si el enclavamiento permitió el comando - si `send()` no puede fallar, el puente no tiene forma de evitar afirmar éxito ante un comando que nunca llegó de verdad. `SimulatedTransport` existe justamente para que ese camino de fallo sea real y testeable hoy, sin esperar a que exista un transporte real.
@@ -105,7 +106,7 @@ Requiere el toolchain de Rust (`cargo`/`rustc`, instalar vía [rustup](https://r
 
 ```bash
 # Linux / macOS
-./build.sh   # bump de version cuentakilometros, `cargo test` (24 tests), luego `cargo build --release`
+./build.sh   # bump de version cuentakilometros, `cargo test` (35 tests), luego `cargo build --release`
 ./run.sh     # ejecuta target/release/hydra-umc-hil-bridge, imprime nombre + version + rol
 ```
 
@@ -120,8 +121,11 @@ run.bat
 Los subcomandos reales `route` y `mirror`:
 
 ```bash
-./run.sh route --mode real --joint shoulder --position 0.5
+./run.sh route --mode real --joint shoulder --position 0.5 --clear-distance 2.0
 # SENT: routed to real HYDRA-UMC controller
+
+./run.sh route --mode real --joint shoulder --position 0.5
+# BLOCKED: safety interlock refused to forward to real hardware (no twin risk report: a real command is not forwarded without one)
 
 ./run.sh route --mode real --joint shoulder --position 0.5 --collision-risk --distance 0.02
 # BLOCKED: safety interlock refused to forward to real hardware (twin reports imminent collision at 0.020m)

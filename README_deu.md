@@ -4,7 +4,7 @@
 
 # 🌉 HYDRA-UMC-HIL-BRIDGE
 
-<p align="center"><a href="README.md">🇺🇸 English</a> | <a href="README_spa.md">🇪🇸 Español</a> | <a href="README_fra.md">🇫🇷 Français</a> | <a href="README_ita.md">🇮🇹 Italiano</a> | 🇩🇪 <b>Deutsch</b> | <a href="README_zho.md">🇨🇳 简体中文</a> | <a href="README_jpn.md">🇯🇵 日本語</a></p>
+<p align="center"><a href="README.md">🇺🇸 English</a> | <a href="README_spa.md">🇪🇸 Español</a> | <a href="README_fra.md">🇫🇷 Français</a> | <a href="README_ita.md">🇮🇹 Italiano</a> | 🇩🇪 <b>Deutsch</b> | <a href="README_zho.md">🇨🇳 简体中文</a> | <a href="README_jpn.md">🇯🇵 日本語</a> | <a href="README_por.md">🇵🇹 Português</a></p>
 
 ### ⚡ Hardware-in-the-Loop-Schnittstelle für Real-vs-Virtual-Sync
 
@@ -25,6 +25,7 @@ Sie ermöglicht es Entwicklern, Befehle von jeder Schnittstelle (App, Suite, Stu
 
 ### Hauptmerkmale:
 * 🛡️ **Sicherheitsverriegelung (v0):** der echte Subbefehl `route` blockiert einen für echte Hardware bestimmten Befehl, sobald ein Zwillings-Risikobericht eine bevorstehende Kollision meldet - siehe "Ehrlichkeitscheck" unten für das, was heute genau läuft.
+* 🧯 **Die Verriegelung fällt geschlossen aus (v0):** Im Modus `real` wird ein Befehl nur mit einem Zwillings-Risikobericht weitergeleitet, der den Weg als frei meldet: ohne Bericht wird er blockiert (ihn wegzulassen galt früher als "keine Kollision" und genügte, um die Hardware zu erreichen), eine NaN-Distanz blockiert ihn, ebenso weniger als 5 cm Abstand, auch wenn der Zwilling `collision_imminent` nicht gesetzt hat (`MIN_CLEARANCE_M`). `--clear-distance METER` liefert der CLI einen Frei-Bericht; Anfragekörper über 16 KB werden mit `413` abgelehnt. Ein Bericht, den der Aufrufer in derselben Anfrage mitschickt, bleibt bis zum Zwillingstransport das Wort des Aufrufers. *(implementiert)*
 * 🌉 **Bidirektionale Brücke (v0, noch ohne Transport):** echtes modusbasiertes Routing (Real/Simulation) und echtes, bedingungsloses Spiegeln existieren bereits; es gibt noch keine echte gRPC/WebSocket-Verbindung zu einem echten HYDRA-UMC-TWIN oder HYDRA-UMC-Controller.
 * ⚡ **Zero-Latency Mirroring (teilweise):** der echte Subbefehl `mirror` spiegelt einen Befehl heute in einen In-Memory-Empfänger; "Zero-Latency" über eine echte Netzwerkverbindung bleibt zukünftige Arbeit.
 * 📡 **Einheitliches Protokoll (geplant):** nutzt gRPC für Hochgeschwindigkeits-Lokal-Sync und WebSockets für die Fernüberwachung - es ist absichtlich noch kein Netzwerktransport angeschlossen (siehe `Cargo.toml`).
@@ -61,7 +62,7 @@ flowchart LR
 * **Warum diese Brücke keine `hardware/`/`firmware/`/`os/`-Ordner hat.** Reine Software - sie verbindet bereits vorhandene Hardware (echte Apps, echte HYDRA-UMC-Firmware) mit dem digitalen Zwilling, ohne eigene Platine.
 * **Warum sie Geschwister, kein Submodul, von HYDRA-UMC-TWIN ist.** Eine Hardware-in-the-Loop-Brücke muss weiterlaufen (und die Befehle eines echten Geräts weiterfließen lassen), unabhängig davon, was die eigene Render-/Physikschleife von HYDRA-UMC-TWIN gerade tut - ein separater Prozess bedeutet, dass ein Neustart des Zwillings keinen laufenden echten Befehl verwirft.
 * **Wie sich das ins restliche Ökosystem einfügt.** Lässt HYDRA-UMC-SUITE, HYDRA-UMC-ANDROID-CONTROL und HYDRA-UMC-IOS-CONTROL HYDRA-UMC-TWIN steuern, als wäre es eine echte, von HYDRA-UMC-SERVER unterstützte Zelle - dieselbe Steuerungsoberfläche, ein simuliertes Ziel.
-* **Warum die Verriegelung dem eigenen `collision_imminent`-Flag des Zwillings vertraut, statt eines aus einem Distanzschwellenwert abzuleiten.** Der Zwilling hat die echte geometrische/physikalische Überlegung bereits angestellt, wenn er das Risiko meldet - diese Schlussfolgerung hier mit einem unabhängigen Distanz-Cutoff infrage zu stellen, wäre nur eine zweite, möglicherweise widersprüchliche Sicherheitsmeinung. Siehe die eigene Dokumentation des `interlock.rs`-Moduls dafür, wie dies die Erkennen-vs-Durchsetzen-Grenze von HYDRA-UMC-SAFETY-ZONES widerspiegelt.
+* **Warum die Verriegelung dem eigenen `collision_imminent`-Flag des Zwillings vertraut und trotzdem einen Mindestabstand ergänzt und geschlossen ausfällt.** Der Zwilling hat die eigentliche geometrische/physikalische Überlegung beim Melden des Risikos schon geleistet, daher leitet die Brücke Kollisionen nicht erneut ab; aber ein Zwilling, der bei einem Millimeter "keine Kollision" sagt, eine NaN-Distanz oder gar kein Bericht sind keine Aussage, dass der Weg frei ist, und blockieren daher den Befehl (`MIN_CLEARANCE_M` = 5 cm, eine konservative Untergrenze und keine zertifizierte Distanz: die liegt bei der Firmware). Siehe die Moduldokumentation von `interlock.rs`, wie das die Detect-vs-Enforce-Grenze von HYDRA-UMC-SAFETY-ZONES spiegelt.
 * **Warum der `Simulation`-Modus nie durch die Verriegelung blockiert wird.** Der ganze Sinn, einen Befehl an den Zwilling statt an echte Hardware zu leiten, ist es, eine vorhergesagte Kollision sicher beobachten zu können - sie dort zu blockieren würde genau die Funktion zunichtemachen, die sie unterstützen soll.
 * **Warum `CommandSink` heute ein Trait mit nur einer In-Memory-Implementierung `RecordingSink` ist.** Es gibt noch keinen echten gRPC/WebSocket-Transport (siehe den eigenen Kommentar in `Cargo.toml`) - `RecordingSink` ist ehrlich damit: Es zeichnet auf, was es senden sollte, ohne irgendwohin zu übertragen, dieselbe Überlegung wie bei `NullEStopRequester` in HYDRA-UMC-SAFETY-ZONES.
 * **Warum `CommandSink::send()` ein `Result` statt `()` zurückgibt.** Ein echter Transport kann bei der Zustellung scheitern (Timeout, Verbindungsabbruch), unabhängig davon, ob die Verriegelung den Befehl durchgelassen hat - wenn `send()` nicht fehlschlagen kann, hat die Brücke keine Möglichkeit, Erfolg für einen Befehl zu behaupten, der nie wirklich angekommen ist. `SimulatedTransport` existiert genau deshalb, damit dieser Fehlerpfad heute real und testbar ist, ohne auf einen echten Transport zu warten.
@@ -106,7 +107,7 @@ Erfordert die Rust-Toolchain (`cargo`/`rustc`, Installation via [rustup](https:/
 
 ```bash
 # Linux / macOS
-./build.sh   # Kilometerzähler-Versions-Bump, `cargo test` (24 Tests), dann `cargo build --release`
+./build.sh   # Kilometerzähler-Versions-Bump, `cargo test` (35 Tests), dann `cargo build --release`
 ./run.sh     # führt target/release/hydra-umc-hil-bridge aus, gibt Name + Version + Rolle aus
 ```
 
@@ -121,8 +122,11 @@ run.bat
 Die echten Subbefehle `route` und `mirror`:
 
 ```bash
-./run.sh route --mode real --joint shoulder --position 0.5
+./run.sh route --mode real --joint shoulder --position 0.5 --clear-distance 2.0
 # SENT: routed to real HYDRA-UMC controller
+
+./run.sh route --mode real --joint shoulder --position 0.5
+# BLOCKED: safety interlock refused to forward to real hardware (no twin risk report: a real command is not forwarded without one)
 
 ./run.sh route --mode real --joint shoulder --position 0.5 --collision-risk --distance 0.02
 # BLOCKED: safety interlock refused to forward to real hardware (twin reports imminent collision at 0.020m)

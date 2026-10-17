@@ -34,6 +34,14 @@ semantic-versioning judgment calls:
   future network transport has that guarantee: a real transport must provide
   its own sequence and acknowledgement evidence before hardware validation.
 
+## [0.0.7] - The interlock fails closed: no twin report, a NaN distance or under 5 cm of clearance block a real command
+
+- In `real` mode a command without a twin risk report is now `BlockedByInterlock` ("no twin risk report"): the report used to default to "no collision" and the caller sends it in the same request, so omitting it was enough to reach the hardware. Simulation mode is unchanged.
+- A NaN distance and less than 5 cm of clearance (`MIN_CLEARANCE_M`) also block, even when `collision_imminent` is false; the old test that allowed 1 mm of clearance now asserts the opposite.
+- New `--clear-distance METERS` on `route` supplies a clear report; the HTTP `risk` field is required in real mode.
+- Request bodies over 16 KB are refused with `413` instead of being read without a limit.
+- 9 new tests (35 in total); `docs/CLI_REFERENCE.md`, the 7 READMEs and a Portuguese README say so.
+
 ## [0.0.6] - Simulated, blocked and failed-delivery outcomes are named everywhere
 
 - Every routed command now reports a stable outcome kind (`sent_real`,

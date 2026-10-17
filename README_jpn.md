@@ -4,7 +4,7 @@
 
 # 🌉 HYDRA-UMC-HIL-BRIDGE
 
-<p align="center"><a href="README.md">🇺🇸 English</a> | <a href="README_spa.md">🇪🇸 Español</a> | <a href="README_fra.md">🇫🇷 Français</a> | <a href="README_ita.md">🇮🇹 Italiano</a> | <a href="README_deu.md">🇩🇪 Deutsch</a> | <a href="README_zho.md">🇨🇳 简体中文</a> | 🇯🇵 <b>日本語</b></p>
+<p align="center"><a href="README.md">🇺🇸 English</a> | <a href="README_spa.md">🇪🇸 Español</a> | <a href="README_fra.md">🇫🇷 Français</a> | <a href="README_ita.md">🇮🇹 Italiano</a> | <a href="README_deu.md">🇩🇪 Deutsch</a> | <a href="README_zho.md">🇨🇳 简体中文</a> | 🇯🇵 <b>日本語</b> | <a href="README_por.md">🇵🇹 Português</a></p>
 
 ### ⚡ 実際と仮想の同期のためのハードウェア・イン・ザ・ループインターフェース
 
@@ -30,6 +30,7 @@
 
 ### 主な機能：
 * 🛡️ **安全インターロック（v0）：** 実際の `route` サブコマンドは、ツインのリスクレポートが衝突切迫を示すたびに、実際のハードウェア宛てのコマンドをブロックします——今日実際に何が動くのかは下記「正直な現状確認」を参照してください。
+* 🧯 **インターロックはフェイルクローズです（v0）：** `real` モードでは、経路が空いていると伝えるツインのリスクレポートがある場合にだけコマンドを転送します。レポートがなければブロックされ（省略すると以前は「衝突なし」とみなされ、ハードウェアに届いていました）、距離が NaN の場合もブロックされ、ツインが `collision_imminent` を立てていなくても余裕が 5 cm 未満ならブロックされます（`MIN_CLEARANCE_M`）。`--clear-distance メートル` で CLI に空きありのレポートを渡せます。16 KB を超えるリクエストボディは `413` で拒否されます。同じリクエストで呼び出し側が送るレポートは、ツインのトランスポートができるまでは呼び出し側の申告のままです。*（実装済み）*
 * 🌉 **双方向ブリッジ（v0、まだトランスポートなし）：** 実際のモードベースルーティング（実際/シミュレーション）と実際の無条件ミラーリングはすでに存在します。実際の HYDRA-UMC-TWIN や HYDRA-UMC コントローラーへの実際の gRPC/WebSocket 接続はまだありません。
 * ⚡ **ゼロレイテンシーミラーリング（部分的）：** 実際の `mirror` サブコマンドは、今日はコマンドをメモリ内の記録用シンクへミラーリングします。実際のネットワーク接続上での「ゼロレイテンシー」はまだ今後の課題です。
 * 📡 **統一プロトコル（計画中）：** 高速なローカル同期には gRPC を、リモート監視には WebSocket を使用します——意図的に、まだどのネットワークトランスポートも接続されていません（`Cargo.toml` を参照）。
@@ -65,7 +66,7 @@ flowchart LR
 * **本ブリッジに `hardware/`/`firmware/`/`os/` フォルダがない理由。** 純粋なソフトウェアです——既存のハードウェア（実際のアプリ、実際の HYDRA-UMC ファームウェア）をデジタルツインに橋渡しするだけで、独自の基板を持ちません。
 * **HYDRA-UMC-TWIN のサブモジュールではなく兄弟プロジェクトである理由。** ハードウェア・イン・ザ・ループのブリッジは、その瞬間に HYDRA-UMC-TWIN 自身のレンダリング/物理ループが何をしていようとも、独立して動作し続ける（そして実際のデバイスのコマンドを流し続ける）必要があります——独立したプロセスであることにより、ツインの再起動が進行中の実際のコマンドを取りこぼすことはありません。
 * **エコシステムの他の部分との関係。** HYDRA-UMC-SUITE、HYDRA-UMC-ANDROID-CONTROL、HYDRA-UMC-IOS-CONTROL が、HYDRA-UMC-TWIN をあたかも実際の HYDRA-UMC-SERVER に支えられたセルであるかのように制御できるようにします——同じ制御インターフェースで、対象がシミュレーションであるという違いだけです。
-* **インターロックが距離しきい値から再導出する代わりに、ツイン自身の `collision_imminent` フラグを信頼する理由。** ツインはリスクを報告する時点で、すでに実際の幾何学的/物理的な推論を行っています——ここで独立した距離カットオフを使ってその結論に異議を唱えても、2 つ目の、場合によっては矛盾する安全上の意見が生まれるだけです。これが HYDRA-UMC-SAFETY-ZONES の検知と執行の境界をどう反映しているかについては、`interlock.rs` 自身のモジュールドキュメントを参照してください。
+* **インターロックがツイン自身の `collision_imminent` フラグを信頼しつつ、最小クリアランスを加えてフェイルクローズにする理由。** ツインがリスクを報告する時点で実際の幾何/物理の推論はすでに済んでいるため、ブリッジは衝突を再導出しません。ただし、1 ミリメートルで「衝突なし」と言うツイン、NaN の距離、レポートがないことは、経路が空いているという主張にはならないため、コマンドをブロックします（`MIN_CLEARANCE_M` = 5 cm。保守的な下限であり認証済みの距離ではありません。それはファームウェアの責任です）。HYDRA-UMC-SAFETY-ZONES の検出と強制の境界をどう反映しているかは、`interlock.rs` のモジュールドキュメントを参照してください。
 * **`Simulation` モードが決してインターロックの対象にならない理由。** 実際のハードウェアではなくツインへコマンドをルーティングすることの意味そのものが、予測された衝突を安全に観察できるようにすることです——そこでブロックしてしまうと、この機能が支えるはずの目的そのものが失われます。
 * **`CommandSink` が今日、メモリ内実装 `RecordingSink` のみを持つトレイトである理由。** 実際の gRPC/WebSocket トランスポートはまだ存在しません（`Cargo.toml` 自身のコメントを参照）——`RecordingSink` はその点について正直です：送信を依頼された内容を記録するだけで、どこにも送信しません。これは HYDRA-UMC-SAFETY-ZONES の `NullEStopRequester` と同じ考え方です。
 * **`CommandSink::send()` が `()` ではなく `Result` を返す理由。** 実際のトランスポートは、インターロックがコマンドを通過させたかどうかとは無関係に、配送に失敗する（タイムアウト、切断）ことがあります——`send()` が失敗しえないなら、ブリッジには実際には届いていないコマンドについて成功を主張することを避ける手段がありません。`SimulatedTransport` は、実際のトランスポートの完成を待たずとも、この失敗経路を今日から実際にテスト可能にするために存在します。
@@ -112,7 +113,7 @@ Rust ツールチェーン（`cargo`/`rustc`、[rustup](https://rustup.rs) 経�
 
 ```bash
 # Linux / macOS
-./build.sh   # オドメーター式バージョンインクリメント、`cargo test`（24 件のテスト）、その後 `cargo build --release`
+./build.sh   # オドメーター式バージョンインクリメント、`cargo test`（35 件のテスト）、その後 `cargo build --release`
 ./run.sh     # target/release/hydra-umc-hil-bridge を実行し、名前 + バージョン + 役割を表示
 ```
 
@@ -130,8 +131,11 @@ run.bat
 実際の `route` および `mirror` サブコマンド：
 
 ```bash
-./run.sh route --mode real --joint shoulder --position 0.5
+./run.sh route --mode real --joint shoulder --position 0.5 --clear-distance 2.0
 # SENT: routed to real HYDRA-UMC controller
+
+./run.sh route --mode real --joint shoulder --position 0.5
+# BLOCKED: safety interlock refused to forward to real hardware (no twin risk report: a real command is not forwarded without one)
 
 ./run.sh route --mode real --joint shoulder --position 0.5 --collision-risk --distance 0.02
 # BLOCKED: safety interlock refused to forward to real hardware (twin reports imminent collision at 0.020m)

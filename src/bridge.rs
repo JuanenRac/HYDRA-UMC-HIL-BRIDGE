@@ -17,7 +17,7 @@
 
 use std::fmt;
 
-use crate::interlock::{assess_interlock, InterlockDecision, TwinRiskReport};
+use crate::interlock::{assess_optional_interlock, InterlockDecision, TwinRiskReport};
 use crate::protocol::{JointCommand, Mode};
 
 /// A transport-level failure to deliver a command - distinct from an
@@ -182,9 +182,9 @@ impl Bridge {
 
     /// Routes one command according to the bridge's current mode. A
     /// `Real`-mode command is only forwarded to `real_sink` if the
-    /// interlock allows it; `risk` of `None` is treated the same as "no
-    /// imminent collision reported" - an honest default for when no twin
-    /// is connected yet, not a silent bypass of the check itself.
+    /// interlock allows it; a `risk` of `None` BLOCKS it (fail closed: no twin report
+    /// is not the same as no risk, and omitting the report used to be enough to
+    /// reach the hardware).
     /// `Simulation`-mode commands always reach `sim_sink`, ungated - see
     /// `protocol::Mode::Simulation`'s own docs for why.
     pub fn route_command(
@@ -201,23 +201,15 @@ impl Bridge {
                     reason: e.to_string(),
                 },
             },
-            Mode::Real => {
-                let risk = risk.unwrap_or(TwinRiskReport {
-                    collision_imminent: false,
-                    distance_m: f64::INFINITY,
-                });
-                match assess_interlock(&risk) {
-                    InterlockDecision::Allow => match real_sink.send(&command) {
-                        Ok(()) => RouteOutcome::SentReal,
-                        Err(e) => RouteOutcome::TransportFailure {
-                            reason: e.to_string(),
-                        },
+            Mode::Real => match assess_optional_interlock(risk.as_ref()) {
+                InterlockDecision::Allow => match real_sink.send(&command) {
+                    Ok(()) => RouteOutcome::SentReal,
+                    Err(e) => RouteOutcome::TransportFailure {
+                        reason: e.to_string(),
                     },
-                    InterlockDecision::Block { reason } => {
-                        RouteOutcome::BlockedByInterlock { reason }
-                    }
-                }
-            }
+                },
+                InterlockDecision::Block { reason } => RouteOutcome::BlockedByInterlock { reason },
+            },
         }
     }
 
@@ -240,6 +232,13 @@ impl Bridge {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn clear() -> TwinRiskReport {
+        TwinRiskReport {
+            collision_imminent: false,
+            distance_m: 2.0,
+        }
+    }
 
     fn cmd(joint: &str, position: f64) -> JointCommand {
         JointCommand {
@@ -293,14 +292,38 @@ mod tests {
     }
 
     #[test]
-    fn real_mode_routes_to_real_sink_when_no_risk() {
+    fn real_mode_routes_to_real_sink_when_the_twin_reports_it_clear() {
+        let bridge = Bridge::new(Mode::Real);
+        let mut real = RecordingSink::default();
+        let mut sim = RecordingSink::default();
+        let outcome = bridge.route_command(cmd("j1", 0.5), Some(clear()), &mut real, &mut sim);
+        assert_eq!(outcome, RouteOutcome::SentReal);
+        assert_eq!(real.received.len(), 1);
+        assert!(sim.received.is_empty());
+    }
+
+    #[test]
+    fn real_mode_without_a_twin_report_is_blocked_and_never_reaches_the_hardware() {
         let bridge = Bridge::new(Mode::Real);
         let mut real = RecordingSink::default();
         let mut sim = RecordingSink::default();
         let outcome = bridge.route_command(cmd("j1", 0.5), None, &mut real, &mut sim);
-        assert_eq!(outcome, RouteOutcome::SentReal);
-        assert_eq!(real.received.len(), 1);
-        assert!(sim.received.is_empty());
+        match outcome {
+            RouteOutcome::BlockedByInterlock { reason } => {
+                assert!(reason.contains("no twin risk report"))
+            }
+            other => panic!("expected a block, got {other:?}"),
+        }
+        assert!(real.received.is_empty());
+    }
+
+    #[test]
+    fn simulation_mode_does_not_need_a_twin_report() {
+        let bridge = Bridge::new(Mode::Simulation);
+        let mut real = RecordingSink::default();
+        let mut sim = RecordingSink::default();
+        let outcome = bridge.route_command(cmd("j1", 0.5), None, &mut real, &mut sim);
+        assert_eq!(outcome, RouteOutcome::SentSimulation);
     }
 
     #[test]
@@ -379,7 +402,7 @@ mod tests {
         let bridge = Bridge::new(Mode::Real);
         let mut real = SimulatedTransport::healthy().with_timeout(500, 100);
         let mut sim = RecordingSink::default();
-        let outcome = bridge.route_command(cmd("j1", 0.5), None, &mut real, &mut sim);
+        let outcome = bridge.route_command(cmd("j1", 0.5), Some(clear()), &mut real, &mut sim);
         assert_eq!(
             outcome,
             RouteOutcome::TransportFailure {
@@ -394,7 +417,7 @@ mod tests {
         let bridge = Bridge::new(Mode::Real);
         let mut real = SimulatedTransport::disconnected();
         let mut sim = RecordingSink::default();
-        let outcome = bridge.route_command(cmd("j1", 0.5), None, &mut real, &mut sim);
+        let outcome = bridge.route_command(cmd("j1", 0.5), Some(clear()), &mut real, &mut sim);
         assert_eq!(
             outcome,
             RouteOutcome::TransportFailure {
