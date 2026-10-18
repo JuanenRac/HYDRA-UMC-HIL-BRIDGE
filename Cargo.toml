@@ -1,10 +1,10 @@
 [package]
 name = "hydra-umc-hil-bridge"
-version = "0.0.7"
+version = "0.0.8"
 edition = "2021"
 description = "Hardware-in-the-loop interface for real-vs-virtual command syncing between HYDRA-UMC controllers and HYDRA-UMC-TWIN."
 authors = ["JuanenRac (Electro Hobby 3D) <electrohobby3d@gmail.com>"]
-license = "GPL-3.0-only"
+license = "GPL-3.0-or-later"
 readme = "README.md"
 
 # Real gap found auditing the ecosystem against actual CM5 hardware: the

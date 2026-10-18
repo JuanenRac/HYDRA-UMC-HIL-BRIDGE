@@ -19,8 +19,16 @@ semantic-versioning judgment calls:
 
 ---
 
-## Unreleased - Simulated transport ordering evidence
+## [0.0.8] - The HTTP API refuses browser-style requests and invalid commands
 
+- `POST` requests must be declared as `Content-Type: application/json` (`415` otherwise) and are refused with `403` when they carry an `Origin` header: a web page could send a "simple" cross-site `POST` (`text/plain`, no preflight) to the loopback port and reach `/route`.
+- A command is validated before it is routed: an empty or over-long joint name and a non-finite position (`NaN`, `inf`, `1e999`) are refused with `400` over HTTP and with exit code `2` on the CLI. The joint list, limits and units are still not known to the bridge.
+- The simulated-transport fields of a `/route` request (`transport`) are refused with `400` unless the server is started with `--fault-injection`, so a deployed instance cannot be told to fake a link fault.
+- A request body that is not valid UTF-8 is a `400` instead of a `413` (`413` stays for bodies over 16 KB).
+- A known path with the wrong method (`GET /route`, `POST /stats`) answers `405` with an `Allow` header instead of `404`.
+- CLI: a flag followed by another flag no longer takes it as its value (`--joint --position 1`), and a malformed `--distance` is an error instead of a silent `0.0`.
+- `Cargo.lock` is now versioned so builds of this binary are reproducible; the manifest `build` command lost a stray trailing dot; the crate license is `GPL-3.0-or-later` like the rest of the family.
+- `docs/CLI_REFERENCE.md`: fixed the unclosed code block in the real-mode examples, the stale version in the sample output and the `GET /stats` description; the README no longer lists a `build/` folder that does not exist, states every condition that blocks a real command, and counts 47 tests.
 - **`GET /stats` now reports real process-lifetime counters** (new
   `Stats` struct in `server.rs`): it used to return a hardcoded static JSON
   body, since each request built a fresh `Bridge`/`RecordingSink` with

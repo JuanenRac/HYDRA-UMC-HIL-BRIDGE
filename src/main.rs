@@ -36,6 +36,8 @@ fn find_flag(args: &[String], flag: &str) -> Option<String> {
     args.iter()
         .position(|a| a == flag)
         .and_then(|i| args.get(i + 1))
+        // a following flag is not this flag's value (`--joint --position 1`)
+        .filter(|v| !v.starts_with("--"))
         .cloned()
 }
 
@@ -49,7 +51,9 @@ fn parse_command(args: &[String]) -> Result<JointCommand, String> {
     let position: f64 = position_str
         .parse()
         .map_err(|_| format!("'{position_str}' is not a valid number for --position"))?;
-    Ok(JointCommand { joint, position })
+    let command = JointCommand { joint, position };
+    command.validate()?;
+    Ok(command)
 }
 
 fn run_route(args: &[String]) -> ExitCode {
@@ -75,9 +79,16 @@ fn run_route(args: &[String]) -> ExitCode {
     };
 
     let risk = if has_flag(args, "--collision-risk") {
-        let distance_m: f64 = find_flag(args, "--distance")
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0.0);
+        let distance_m: f64 = match find_flag(args, "--distance") {
+            None => 0.0,
+            Some(text) => match text.parse() {
+                Ok(v) => v,
+                Err(_) => {
+                    eprintln!("route: --distance must be a number of meters, got '{text}'");
+                    return ExitCode::from(2);
+                }
+            },
+        };
         Some(TwinRiskReport {
             collision_imminent: true,
             distance_m,
@@ -186,7 +197,11 @@ fn run_serve(args: &[String]) -> ExitCode {
         Ok(bound) => {
             eprintln!("[hil-bridge] HTTP API listening on {bind_addr}");
             eprintln!("[hil-bridge] POST /route, POST /mirror, GET /stats");
-            server::run(bound);
+            let fault_injection = has_flag(args, "--fault-injection");
+            if fault_injection {
+                eprintln!("[hil-bridge] simulated transport fault injection is ENABLED");
+            }
+            server::run(bound, fault_injection);
             ExitCode::SUCCESS
         }
         Err(e) => {
@@ -208,5 +223,32 @@ fn main() -> ExitCode {
             println!("{ROLE}");
             ExitCode::SUCCESS
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_flag_does_not_take_the_next_flag_as_its_value() {
+        let a = args(&["--joint", "--position", "1"]);
+        assert_eq!(find_flag(&a, "--joint"), None);
+        assert_eq!(find_flag(&a, "--position"), Some("1".to_string()));
+        assert!(parse_command(&a).is_err());
+    }
+
+    #[test]
+    fn a_command_with_a_non_finite_position_is_refused() {
+        for bad in ["NaN", "inf", "-inf"] {
+            let a = args(&["--joint", "shoulder", "--position", bad]);
+            assert!(parse_command(&a).is_err(), "position {bad}");
+        }
+        let ok = args(&["--joint", "shoulder", "--position", "1.5"]);
+        assert!(parse_command(&ok).is_ok());
     }
 }

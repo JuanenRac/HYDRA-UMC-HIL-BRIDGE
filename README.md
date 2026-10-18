@@ -32,7 +32,7 @@ It allows developers to send commands from any interface (App, Suite, Studio) to
 * 🧪 **Fail-safe transport, testable without hardware (v0):** `CommandSink::send()` returns a real `Result`, and a `SimulatedTransport` can model a timed-out or disconnected link; the bridge reports a distinct `TransportFailure` outcome rather than ever claiming a command was delivered when it wasn't - exercisable via `--transport-latency-ms`/`--transport-timeout-ms`/`--transport-disconnected` on `route`.
 * 🌐 **HTTP JSON API (v0):** `serve [--addr ADDR] [--port PORT]` (default `127.0.0.1:8113`) exposes the exact same routing/mirroring logic over `POST /route`, `POST /mirror` and `GET /stats` via a real blocking `tiny_http` server - the same binary a deployed CM5's `systemd/hydra-umc-hil-bridge.service` unit runs loopback-only. See [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) for the full request/response contract.
 
-**Honesty check - what actually runs today:** `route --mode real|simulation --joint NAME --position VALUE [--collision-risk] [--distance METERS] [--transport-latency-ms MS] [--transport-timeout-ms MS] [--transport-disconnected]` makes a real routing decision - `simulation` mode always sends, `real` mode is gated by a real safety interlock that blocks the command whenever `--collision-risk` is set. `mirror --joint NAME --position VALUE` shadows a command unconditionally. `serve` exposes both over real HTTP JSON instead of one-shot CLI invocations. All three route to an in-memory sink by default (`RecordingSink`, not a real controller or a real HYDRA-UMC-TWIN instance), or to a `SimulatedTransport` that can genuinely fail (timeout/disconnect) when the transport flags above are passed - there is no gRPC/WebSocket transport yet. See [`CHANGELOG.md`](CHANGELOG.md) for exactly what shipped, [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) for every command/endpoint, and the Roadmap below for what's still ahead.
+**Honesty check - what actually runs today:** `route --mode real|simulation --joint NAME --position VALUE [--collision-risk] [--distance METERS] [--transport-latency-ms MS] [--transport-timeout-ms MS] [--transport-disconnected]` makes a real routing decision - `simulation` mode always sends, `real` mode is gated by a real safety interlock that blocks the command when there is no twin risk report, when `--collision-risk` is set, when the distance is NaN or when there is less than 5 cm of clearance (`--clear-distance METERS` supplies a clear report). `mirror --joint NAME --position VALUE` shadows a command unconditionally. `serve` exposes both over real HTTP JSON instead of one-shot CLI invocations. All three route to an in-memory sink by default (`RecordingSink`, not a real controller or a real HYDRA-UMC-TWIN instance), or to a `SimulatedTransport` that can genuinely fail (timeout/disconnect) when the transport flags above are passed - there is no gRPC/WebSocket transport yet. See [`CHANGELOG.md`](CHANGELOG.md) for exactly what shipped, [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) for every command/endpoint, and the Roadmap below for what's still ahead.
 
 ---
 
@@ -83,7 +83,6 @@ HYDRA-UMC-HIL-BRIDGE/
 │   ├── server.rs         # Plain JSON/HTTP surface (tiny_http, blocking, no async runtime)
 │   └── main.rs           # Entry point + real `route`/`mirror` subcommands
 ├── docs/                # Documentation and integration guides
-├── build/               # Build notes/artifacts (cargo's own output lives in target/, gitignored)
 ├── images/              # Media and diagrams
 ├── systemd/
 │   └── hydra-umc-hil-bridge.service # Local CM5 route/mirror API systemd unit
@@ -106,7 +105,7 @@ Requires the Rust toolchain (`cargo`/`rustc`, install via [rustup](https://rustu
 
 ```bash
 # Linux / macOS
-./build.sh   # odometer version bump, `cargo test` (35 tests), then `cargo build --release`
+./build.sh   # odometer version bump, `cargo test` (47 tests), then `cargo build --release`
 ./run.sh     # runs target/release/hydra-umc-hil-bridge, prints name + version + role
 ```
 

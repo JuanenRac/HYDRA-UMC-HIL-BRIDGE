@@ -37,7 +37,7 @@
 * 🧪 **ハードウェアなしでテスト可能なフェイルセーフ・トランスポート（v0）：** `CommandSink::send()` は今では実際の `Result` を返し、`SimulatedTransport` はタイムアウトまたは切断されたリンクをモデル化できます。ブリッジはコマンドが実際には届いていないのに届いたと主張することは決してなく、独立した `TransportFailure` という結果を報告します——`route` の `--transport-latency-ms`/`--transport-timeout-ms`/`--transport-disconnected` で実際に発生させて確認できます。
 * 🌐 **HTTP JSON API（v0）：** `serve [--addr ADDR] [--port PORT]`（デフォルト `127.0.0.1:8113`）は、同じルーティング/ミラーリングロジックを実際のブロッキング `tiny_http` サーバー経由で `POST /route`、`POST /mirror`、`GET /stats` として公開します——デプロイされた CM5 の `systemd/hydra-umc-hil-bridge.service` ユニットが実行するのと同じバイナリです（ループバックのみ）。完全なリクエスト/レスポンス契約は [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) を参照してください。
 
-**正直な現状確認 —— 今日実際に動くもの：** `route --mode real|simulation --joint 名前 --position 値 [--collision-risk] [--distance メートル] [--transport-latency-ms MS] [--transport-timeout-ms MS] [--transport-disconnected]` は実際のルーティング判断を行います——`simulation` モードは常に送信し、`real` モードは `--collision-risk` が指定されるたびにコマンドをブロックする実際の安全インターロックの対象になります。`mirror --joint 名前 --position 値` はコマンドを無条件にミラーリングします。`serve` は、一度きりの CLI 呼び出しの代わりに、両方を実際の HTTP JSON 経由でも公開します。3つとも既定ではメモリ内の受信先（`RecordingSink`、実際のコントローラーや実際の HYDRA-UMC-TWIN インスタンスではない）へルーティングされ、上記のトランスポートフラグが渡された場合は実際に失敗しうる（タイムアウト/切断）`SimulatedTransport` へルーティングされます——まだ gRPC/WebSocket トランスポートは存在しません。実際に出荷済みの内容は [`CHANGELOG.md`](CHANGELOG.md) を、すべてのコマンド/エンドポイントは [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) を、まだ残っている作業は下記のロードマップを参照してください。
+**正直な現状確認 —— 今日実際に動くもの：** `route --mode real|simulation --joint 名前 --position 値 [--collision-risk] [--distance メートル] [--transport-latency-ms MS] [--transport-timeout-ms MS] [--transport-disconnected]` は実際のルーティング判断を行います——`simulation` モードは常に送信し、`real` モードは ツインのリスクレポートが無い場合、`--collision-risk` が指定された場合、距離が NaN の場合、または余裕が 5 cm 未満の場合にコマンドをブロックする実際の安全インターロック（`--clear-distance メートル` で安全なレポートを渡せます）の対象になります。`mirror --joint 名前 --position 値` はコマンドを無条件にミラーリングします。`serve` は、一度きりの CLI 呼び出しの代わりに、両方を実際の HTTP JSON 経由でも公開します。3つとも既定ではメモリ内の受信先（`RecordingSink`、実際のコントローラーや実際の HYDRA-UMC-TWIN インスタンスではない）へルーティングされ、上記のトランスポートフラグが渡された場合は実際に失敗しうる（タイムアウト/切断）`SimulatedTransport` へルーティングされます——まだ gRPC/WebSocket トランスポートは存在しません。実際に出荷済みの内容は [`CHANGELOG.md`](CHANGELOG.md) を、すべてのコマンド/エンドポイントは [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) を、まだ残っている作業は下記のロードマップを参照してください。
 
 ---
 
@@ -89,7 +89,6 @@ HYDRA-UMC-HIL-BRIDGE/
 │   ├── server.rs         # シンプルなJSON/HTTPサーフェス(tiny_http、ブロッキング、非同期ランタイムなし)
 │   └── main.rs           # エントリポイント + 実際の `route`/`mirror` サブコマンド
 ├── docs/                # ドキュメントと統合ガイド
-├── build/               # ビルドノート/成果物（cargo 自身の出力は target/ にあり、gitignore 対象）
 ├── images/              # メディアと図表
 ├── systemd/
 │   └── hydra-umc-hil-bridge.service # ローカルCM5 route/mirror APIのsystemdユニット
@@ -113,7 +112,7 @@ Rust ツールチェーン（`cargo`/`rustc`、[rustup](https://rustup.rs) 経�
 
 ```bash
 # Linux / macOS
-./build.sh   # オドメーター式バージョンインクリメント、`cargo test`（35 件のテスト）、その後 `cargo build --release`
+./build.sh   # オドメーター式バージョンインクリメント、`cargo test`（47 件のテスト）、その後 `cargo build --release`
 ./run.sh     # target/release/hydra-umc-hil-bridge を実行し、名前 + バージョン + 役割を表示
 ```
 

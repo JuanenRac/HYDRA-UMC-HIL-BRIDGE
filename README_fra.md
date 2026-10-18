@@ -32,7 +32,7 @@ Il permet aux développeurs d'envoyer des commandes depuis n'importe quelle inte
 * 🧪 **Transport à sécurité intrinsèque, testable sans matériel (v0) :** `CommandSink::send()` renvoie désormais un vrai `Result`, et un `SimulatedTransport` peut simuler une liaison en timeout ou déconnectée ; le pont rapporte un résultat `TransportFailure` distinct plutôt que de jamais prétendre qu'une commande a été livrée alors qu'elle ne l'a pas été - exerçable via `--transport-latency-ms`/`--transport-timeout-ms`/`--transport-disconnected` sur `route`.
 * 🌐 **API HTTP JSON (v0) :** `serve [--addr ADDR] [--port PORT]` (par défaut `127.0.0.1:8113`) expose exactement la même logique d'acheminement/mise en miroir via `POST /route`, `POST /mirror` et `GET /stats` sur un vrai serveur `tiny_http` bloquant - le même binaire que celui exécuté par l'unité `systemd/hydra-umc-hil-bridge.service` sur une CM5 déployée, en loopback uniquement. Voir [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) pour le contrat complet requête/réponse.
 
-**Vérification d'honnêteté - ce qui fonctionne réellement aujourd'hui :** `route --mode real|simulation --joint NOM --position VALEUR [--collision-risk] [--distance MÈTRES] [--transport-latency-ms MS] [--transport-timeout-ms MS] [--transport-disconnected]` prend une vraie décision d'acheminement - le mode `simulation` envoie toujours, le mode `real` est soumis à un vrai verrouillage de sécurité qui bloque la commande dès que `--collision-risk` est indiqué. `mirror --joint NOM --position VALEUR` reflète une commande inconditionnellement. `serve` expose les deux via du vrai HTTP JSON plutôt que des invocations CLI ponctuelles. Tous les trois acheminent par défaut vers un récepteur en mémoire (`RecordingSink`, pas un vrai contrôleur ni une vraie instance HYDRA-UMC-TWIN), ou vers un `SimulatedTransport` qui peut réellement échouer (timeout/déconnexion) quand les indicateurs de transport ci-dessus sont passés - il n'y a pas encore de transport gRPC/WebSocket. Voir [`CHANGELOG.md`](CHANGELOG.md) pour ce qui a été livré exactement, [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) pour chaque commande/endpoint, et la Roadmap ci-dessous pour ce qui reste à venir.
+**Vérification d'honnêteté - ce qui fonctionne réellement aujourd'hui :** `route --mode real|simulation --joint NOM --position VALEUR [--collision-risk] [--distance MÈTRES] [--transport-latency-ms MS] [--transport-timeout-ms MS] [--transport-disconnected]` prend une vraie décision d'acheminement - le mode `simulation` envoie toujours, le mode `real` est soumis à un vrai verrouillage de sécurité qui bloque la commande en l'absence de rapport de risque du jumeau, quand `--collision-risk` est indiqué, quand la distance est NaN ou quand il reste moins de 5 cm de dégagement (`--clear-distance MÈTRES` fournit un rapport dégagé). `mirror --joint NOM --position VALEUR` reflète une commande inconditionnellement. `serve` expose les deux via du vrai HTTP JSON plutôt que des invocations CLI ponctuelles. Tous les trois acheminent par défaut vers un récepteur en mémoire (`RecordingSink`, pas un vrai contrôleur ni une vraie instance HYDRA-UMC-TWIN), ou vers un `SimulatedTransport` qui peut réellement échouer (timeout/déconnexion) quand les indicateurs de transport ci-dessus sont passés - il n'y a pas encore de transport gRPC/WebSocket. Voir [`CHANGELOG.md`](CHANGELOG.md) pour ce qui a été livré exactement, [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) pour chaque commande/endpoint, et la Roadmap ci-dessous pour ce qui reste à venir.
 
 ---
 
@@ -84,7 +84,6 @@ HYDRA-UMC-HIL-BRIDGE/
 │   ├── server.rs         # Surface JSON/HTTP simple (tiny_http, bloquant, sans runtime async)
 │   └── main.rs           # Point d'entrée + vrais sous-commandes `route`/`mirror`
 ├── docs/                # Documentation et guides d'intégration
-├── build/               # Notes/artefacts de build (la sortie réelle de cargo vit dans target/, ignoré par git)
 ├── images/              # Médias et diagrammes
 ├── systemd/
 │   └── hydra-umc-hil-bridge.service # Unité systemd de l'API locale route/mirror sur la CM5
@@ -107,7 +106,7 @@ Nécessite la chaîne d'outils Rust (`cargo`/`rustc`, à installer via [rustup](
 
 ```bash
 # Linux / macOS
-./build.sh   # incrément de version compteur kilométrique, `cargo test` (35 tests), puis `cargo build --release`
+./build.sh   # incrément de version compteur kilométrique, `cargo test` (47 tests), puis `cargo build --release`
 ./run.sh     # exécute target/release/hydra-umc-hil-bridge, affiche nom + version + rôle
 ```
 

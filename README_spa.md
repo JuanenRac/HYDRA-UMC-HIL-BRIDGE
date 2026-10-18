@@ -32,7 +32,7 @@ Permite a los desarrolladores enviar comandos desde cualquier interfaz (App, Sui
 * 🧪 **Transporte a prueba de fallos, testeable sin hardware (v0):** `CommandSink::send()` devuelve un `Result` real, y un `SimulatedTransport` puede modelar un enlace con timeout o desconectado; el puente reporta un resultado `TransportFailure` diferenciado en vez de afirmar jamás que un comando fue entregado cuando no lo fue - se puede probar vía `--transport-latency-ms`/`--transport-timeout-ms`/`--transport-disconnected` en `route`.
 * 🌐 **API HTTP en JSON (v0):** `serve [--addr ADDR] [--port PORT]` (por defecto `127.0.0.1:8113`) expone exactamente la misma lógica de encaminamiento/reflejo vía `POST /route`, `POST /mirror` y `GET /stats` sobre un servidor `tiny_http` real y bloqueante - el mismo binario que ejecuta la unidad `systemd/hydra-umc-hil-bridge.service` en una CM5 desplegada, solo en loopback. Ver [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) para el contrato completo de petición/respuesta.
 
-**Comprobación de honestidad - qué funciona hoy de verdad:** `route --mode real|simulation --joint NOMBRE --position VALOR [--collision-risk] [--distance METROS] [--transport-latency-ms MS] [--transport-timeout-ms MS] [--transport-disconnected]` toma una decisión real de encaminamiento - el modo `simulation` siempre envía, el modo `real` está sujeto a un enclavamiento de seguridad real que bloquea el comando siempre que se indique `--collision-risk`. `mirror --joint NOMBRE --position VALOR` refleja un comando incondicionalmente. `serve` expone ambos por HTTP JSON real en vez de invocaciones de CLI de un solo uso. Los tres encaminan por defecto hacia un receptor en memoria (`RecordingSink`, no un controlador real ni una instancia real de HYDRA-UMC-TWIN), o hacia un `SimulatedTransport` que puede fallar de verdad (timeout/desconexión) cuando se pasan los flags de transporte de arriba - todavía no hay transporte gRPC/WebSocket. Ver [`CHANGELOG.md`](CHANGELOG.md) para lo entregado exactamente, [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) para cada comando/endpoint, y la Hoja de Ruta abajo para lo que sigue por delante.
+**Comprobación de honestidad - qué funciona hoy de verdad:** `route --mode real|simulation --joint NOMBRE --position VALOR [--collision-risk] [--distance METROS] [--transport-latency-ms MS] [--transport-timeout-ms MS] [--transport-disconnected]` toma una decisión real de encaminamiento - el modo `simulation` siempre envía, el modo `real` está sujeto a un enclavamiento de seguridad real que bloquea el comando cuando no hay informe de riesgo del gemelo, cuando se indica `--collision-risk`, cuando la distancia es NaN o cuando hay menos de 5 cm de holgura (`--clear-distance METROS` aporta un informe despejado). `mirror --joint NOMBRE --position VALOR` refleja un comando incondicionalmente. `serve` expone ambos por HTTP JSON real en vez de invocaciones de CLI de un solo uso. Los tres encaminan por defecto hacia un receptor en memoria (`RecordingSink`, no un controlador real ni una instancia real de HYDRA-UMC-TWIN), o hacia un `SimulatedTransport` que puede fallar de verdad (timeout/desconexión) cuando se pasan los flags de transporte de arriba - todavía no hay transporte gRPC/WebSocket. Ver [`CHANGELOG.md`](CHANGELOG.md) para lo entregado exactamente, [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) para cada comando/endpoint, y la Hoja de Ruta abajo para lo que sigue por delante.
 
 ---
 
@@ -83,7 +83,6 @@ HYDRA-UMC-HIL-BRIDGE/
 │   ├── server.rs         # Superficie JSON/HTTP plana (tiny_http, bloqueante, sin runtime async)
 │   └── main.rs           # Entry point + subcomandos reales `route`/`mirror`
 ├── docs/                # Documentación y guías de integración
-├── build/               # Notas/artefactos de build (la salida real de cargo vive en target/, en .gitignore)
 ├── images/              # Medios y diagramas
 ├── systemd/
 │   └── hydra-umc-hil-bridge.service # Unidad systemd de la API local de route/mirror en la CM5
@@ -106,7 +105,7 @@ Requiere el toolchain de Rust (`cargo`/`rustc`, instalar vía [rustup](https://r
 
 ```bash
 # Linux / macOS
-./build.sh   # bump de version cuentakilometros, `cargo test` (35 tests), luego `cargo build --release`
+./build.sh   # bump de version cuentakilometros, `cargo test` (47 tests), luego `cargo build --release`
 ./run.sh     # ejecuta target/release/hydra-umc-hil-bridge, imprime nombre + version + rol
 ```
 

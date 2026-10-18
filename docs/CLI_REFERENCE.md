@@ -21,7 +21,7 @@ Bare invocation (no arguments) prints identity/version/role and exits `0`:
 
 ```
 $ hydra-umc-hil-bridge
-HYDRA-UMC-HIL-BRIDGE v0.0.5
+HYDRA-UMC-HIL-BRIDGE v0.0.7
 Hardware-in-the-loop interface for real-vs-virtual command syncing with the Digital Twin.
 ```
 
@@ -60,13 +60,13 @@ SENT: routed to HYDRA-UMC-TWIN (simulation)
 ```
 $ hydra-umc-hil-bridge route --mode real --joint j1 --position 0.5 --clear-distance 2.0
 SENT: routed to real HYDRA-UMC controller
+```
 
 **Real mode, no report** — blocked, exit `1`:
 
 ```
 $ hydra-umc-hil-bridge route --mode real --joint j1 --position 0.5
 BLOCKED: safety interlock refused to forward to real hardware (no twin risk report: a real command is not forwarded without one)
-```
 ```
 
 **Real mode, imminent collision** — the safety interlock blocks the command
@@ -142,7 +142,7 @@ delivered (exit `3`) — `mirror` doesn't currently expose the
 `bridge.mirror_command` returns the same `Result` that `route`'s handling
 above demonstrates.
 
-### `serve [--addr ADDR] [--port PORT]`
+### `serve [--addr ADDR] [--port PORT] [--fault-injection]`
 
 Starts a real, blocking HTTP JSON server (`src/server.rs`, `tiny_http`, no
 async runtime) that exposes the exact same `Bridge::route_command()`/
@@ -152,6 +152,11 @@ the still-deferred real gRPC/WebSocket transport question. `ADDR` defaults
 to `127.0.0.1`, `PORT` to `8113`. This is the same binary the
 `systemd/hydra-umc-hil-bridge.service` unit runs on a deployed CM5
 (`hydra-umc-hil-bridge serve --addr 127.0.0.1 --port 8113`, loopback-only).
+
+`--fault-injection` lets a `/route` request pick a simulated transport (the
+`transport` object below). It is off by default: a server started without it
+answers `400` to any request that carries a `transport` field, so a deployed
+instance cannot be told to fake a link fault.
 
 ```
 $ hydra-umc-hil-bridge serve --addr 127.0.0.1 --port 8113
@@ -163,29 +168,43 @@ $ hydra-umc-hil-bridge serve --addr 127.0.0.1 --port 8113
 
 ```bash
 $ curl -X POST http://127.0.0.1:8113/route \
+    -H 'Content-Type: application/json' \
     -d '{"mode":"real","joint":"shoulder","position":1.0,"risk":{"collision_imminent":true,"distance_m":0.02}}'
 {"BlockedByInterlock":{"reason":"twin reports imminent collision at 0.020m"}}
 ```
+
+Every `POST` must be declared as `Content-Type: application/json` (otherwise
+`415`) and must not carry an `Origin` header (`403`): a web page can send a
+"simple" cross-site `POST` to a loopback port without any preflight, and this
+API has no authentication, so requests that look like they come from a browser
+are refused. Local tools and services do not send `Origin`.
 
 `mode` is `"real"` or `"simulation"`; `risk` mirrors `--collision-risk --distance`
 (`collision_imminent: true`) or `--clear-distance` (`collision_imminent: false`) and is
 **required in real mode**: a real command without one is `BlockedByInterlock` ("no twin risk
 report"), and so is one with a NaN distance or under 5 cm of clearance; in simulation mode it
 is optional. `transport` (optional object with
-`disconnected`/`latency_ms`/`timeout_ms`) mirrors the CLI's
-`--transport-*` flags. The response body is the real `RouteOutcome` enum
+`disconnected`/`latency_ms`/`timeout_ms`, only with `--fault-injection`) mirrors
+the CLI's `--transport-*` flags. The response body is the real `RouteOutcome` enum
 serialized as JSON (`SentReal`, `SentSimulation`,
 `BlockedByInterlock { reason }`, or `TransportFailure { reason }`) — always
 HTTP `200` when the request itself was well-formed; `400` on malformed
-JSON; `413` when the body is larger than 16 KB (it is not read further).
+JSON, on a body that is not valid UTF-8, on an empty or over-long `joint`, on
+a `position` that is not a finite number, or on a `transport` field without
+`--fault-injection`; `413` when the body is larger than 16 KB (it is not read
+further). The bridge does not know the joint list, limits or units yet: it
+only checks the shape of the values.
 
 **`POST /mirror`** — `{"joint": "elbow", "position": -0.3}`, responds
 `{"mirrored": true}` or `{"mirrored": false, "error": "..."}`, both `200`;
-`400` on malformed JSON.
+`400` on malformed JSON or an invalid `joint`/`position` (same checks as `/route`).
 
-**`GET /stats`** — `{"role": "Hardware-in-the-loop real-vs-virtual command bridge"}`, `200`.
+**`GET /stats`** — `200` with the process-lifetime counters: `role`,
+`routedReal`, `routedSimulation`, `blockedByInterlock`, `transportFailures`,
+`mirrored`, `mirrorFailures`, `malformedRequests` and `notFound`.
 
-Any other path, or any non-`POST` request to `/route`/`/mirror`, is `404`.
+A known path with the wrong method (`GET /route`, `POST /stats`) is `405`
+with an `Allow` header; any other path is `404`.
 There is no authentication - same as every other loopback-only internal API
 on the CM5 (see the systemd unit's own `RestrictAddressFamilies`/
 `ProtectSystem` hardening for what it relies on instead).
@@ -196,7 +215,7 @@ on the CM5 (see the systemd unit's own `RestrictAddressFamilies`/
 |------|---------|
 | `0` | ok — command reached its sink (`SentReal`/`SentSimulation`), or `mirror` delivered |
 | `1` | `route` in real mode: the safety interlock blocked the command |
-| `2` | usage error — missing/malformed `--mode`, `--joint`, or `--position` |
+| `2` | usage error — missing/malformed `--mode`, `--joint`, or `--position` (a flag followed by another flag has no value; an empty joint or a non-finite position is refused) |
 | `3` | transport failure — the interlock allowed the command, but delivery to the sink was not confirmed (disconnected or timed out) |
 
 ## Not yet wired in

@@ -35,7 +35,7 @@
 * 🧪 **故障安全传输层，无需硬件即可测试（v0）：** `CommandSink::send()` 现在返回真实的 `Result`；新增的 `SimulatedTransport` 可以模拟超时或断开的链路，桥接服务会报告一个独立的 `TransportFailure` 结果，绝不会在指令实际未送达时声称已送达——可通过 `route` 上的 `--transport-latency-ms`/`--transport-timeout-ms`/`--transport-disconnected` 触发验证。
 * 🌐 **HTTP JSON API（v0）：** `serve [--addr ADDR] [--port PORT]`（默认 `127.0.0.1:8113`）通过一个真实的阻塞式 `tiny_http` 服务器，把同样的路由/镜像逻辑以 `POST /route`、`POST /mirror`、`GET /stats` 的形式对外提供——与部署到 CM5 上的 `systemd/hydra-umc-hil-bridge.service` 单元运行的是同一个二进制文件（仅限回环地址）。完整的请求/响应契约见 [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md)。
 
-**诚实说明——今天实际运行的内容：** `route --mode real|simulation --joint 名称 --position 数值 [--collision-risk] [--distance 米数] [--transport-latency-ms 毫秒] [--transport-timeout-ms 毫秒] [--transport-disconnected]` 会做出真实的路由决策——`simulation` 模式总是发送，`real` 模式受真实安全联锁约束，只要设置了 `--collision-risk` 就会阻止指令。`mirror --joint 名称 --position 数值` 会无条件镜像一条指令。`serve` 则把两者都以真实的 HTTP JSON 形式对外提供，而不再局限于一次性的 CLI 调用。三者默认都路由到一个内存中的接收器（`RecordingSink`，而非真正的控制器或真正的 HYDRA-UMC-TWIN 实例），如果传入上述传输层参数，则路由到一个真的会失败（超时/断开）的 `SimulatedTransport`——目前还没有 gRPC/WebSocket 传输层。具体已交付内容请参见 [`CHANGELOG.md`](CHANGELOG.md)，每个命令/端点请参见 [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md)，尚待完成的内容请参见下方路线图。
+**诚实说明——今天实际运行的内容：** `route --mode real|simulation --joint 名称 --position 数值 [--collision-risk] [--distance 米数] [--transport-latency-ms 毫秒] [--transport-timeout-ms 毫秒] [--transport-disconnected]` 会做出真实的路由决策——`simulation` 模式总是发送，`real` 模式受真实安全联锁约束，在没有孪生体风险报告、设置了 `--collision-risk`、距离为 NaN 或余量小于 5 厘米时就会阻止指令（`--clear-distance 米数` 可提供无碰撞报告）。`mirror --joint 名称 --position 数值` 会无条件镜像一条指令。`serve` 则把两者都以真实的 HTTP JSON 形式对外提供，而不再局限于一次性的 CLI 调用。三者默认都路由到一个内存中的接收器（`RecordingSink`，而非真正的控制器或真正的 HYDRA-UMC-TWIN 实例），如果传入上述传输层参数，则路由到一个真的会失败（超时/断开）的 `SimulatedTransport`——目前还没有 gRPC/WebSocket 传输层。具体已交付内容请参见 [`CHANGELOG.md`](CHANGELOG.md)，每个命令/端点请参见 [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md)，尚待完成的内容请参见下方路线图。
 
 ---
 
@@ -85,7 +85,6 @@ HYDRA-UMC-HIL-BRIDGE/
 │   ├── server.rs         # 简洁的 JSON/HTTP 接口(tiny_http,阻塞式,无异步运行时)
 │   └── main.rs           # 入口点 + 真实的 `route`/`mirror` 子命令
 ├── docs/                # 文档与集成指南
-├── build/               # 构建笔记/产物（cargo 自身的输出位于 target/，已被 gitignore）
 ├── images/              # 媒体与图表
 ├── systemd/
 │   └── hydra-umc-hil-bridge.service # 本地 CM5 route/mirror API 的 systemd 单元
@@ -109,7 +108,7 @@ HYDRA-UMC-HIL-BRIDGE/
 
 ```bash
 # Linux / macOS
-./build.sh   # 里程表式版本递增、`cargo test`（35 个测试），然后执行 `cargo build --release`
+./build.sh   # 里程表式版本递增、`cargo test`（47 个测试），然后执行 `cargo build --release`
 ./run.sh     # 运行 target/release/hydra-umc-hil-bridge，打印名称 + 版本 + 角色
 ```
 

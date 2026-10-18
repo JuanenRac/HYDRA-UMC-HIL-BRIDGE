@@ -78,7 +78,6 @@ HYDRA-UMC-HIL-BRIDGE/
 │   ├── server.rs         # Superfície JSON/HTTP simples (tiny_http, bloqueante, sem runtime assíncrono)
 │   └── main.rs           # Ponto de entrada + subcomandos reais `route`/`mirror`
 ├── docs/                # Documentação e guias de integração
-├── build/               # Notas/artefactos de compilação (a saída do próprio cargo fica em target/, ignorada pelo git)
 ├── images/              # Multimédia e diagramas
 ├── systemd/
 │   └── hydra-umc-hil-bridge.service # Unidade systemd local do CM5 para a API route/mirror
@@ -101,7 +100,7 @@ Requer a cadeia de ferramentas Rust (`cargo`/`rustc`, instale com o [rustup](htt
 
 ```bash
 # Linux / macOS
-./build.sh   # subida de versão em odómetro, `cargo test` (35 testes), depois `cargo build --release`
+./build.sh   # subida de versão em odómetro, `cargo test` (47 testes), depois `cargo build --release`
 ./run.sh     # executa target/release/hydra-umc-hil-bridge, imprime nome + versão + função
 ```
 
