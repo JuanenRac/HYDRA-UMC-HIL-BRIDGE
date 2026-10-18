@@ -9,10 +9,10 @@
 ### ⚡ Interfaccia Hardware-in-the-Loop per la sincronizzazione reale vs virtuale
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Licenza-GPL%203.0-blue.svg" alt="GPL 3.0">
+  <img src="https://img.shields.io/badge/Licenza-GPL%203.0--or--later-blue.svg" alt="GPL 3.0 or later">
   <img src="https://img.shields.io/badge/Protocollo-WebSocket%20%2F%20gRPC-yellow.svg" alt="Protocol">
   <img src="https://img.shields.io/badge/Funzione-Sync%20a%20latenza%20zero-green.svg" alt="Sync">
-  <img src="https://img.shields.io/badge/Fase-Consolidato%20v0-brightgreen.svg" alt="Fase consolidato v0">
+  <img src="https://img.shields.io/badge/Fase-Funzionale%20v0-yellow.svg" alt="Fase funzionale v0">
 </p>
 
 ---
@@ -279,4 +279,4 @@ Questo progetto fa parte dell'ecosistema robotico HYDRA-UMC dello stesso autore 
 📺 [youtube.com/@electrohobby3d](https://youtube.com/@electrohobby3d)
 
 ## 📜 LICENZA
-GPL-3.0 - Vedere LICENSE per i dettagli.
+GPL-3.0-or-later - Vedere LICENSE per i dettagli.

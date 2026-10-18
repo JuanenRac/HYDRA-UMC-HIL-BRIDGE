@@ -1,7 +1,7 @@
 // =============================================================================
 // HYDRA-UMC-HIL-BRIDGE - src/protocol.rs
 // Copyright (C) 2026 JuanenRac (Electro Hobby 3D) <electrohobby3d@gmail.com>
-// GPL-3.0 - see LICENSE
+// GPL-3.0-or-later - see LICENSE
 // =============================================================================
 //! The real message shapes this bridge routes, independent of whatever
 //! real transport (gRPC, WebSocket) eventually carries them - see

@@ -1,7 +1,7 @@
 // =============================================================================
 // HYDRA-UMC-HIL-BRIDGE - src/interlock.rs
 // Copyright (C) 2026 JuanenRac (Electro Hobby 3D) <electrohobby3d@gmail.com>
-// GPL-3.0 - see LICENSE
+// GPL-3.0-or-later - see LICENSE
 // =============================================================================
 //! Real safety interlock logic: the "Safety Interlock" feature this
 //! README already advertised before any of it existed in code -

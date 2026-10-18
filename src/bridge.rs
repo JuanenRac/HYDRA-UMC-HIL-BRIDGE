@@ -1,7 +1,7 @@
 // =============================================================================
 // HYDRA-UMC-HIL-BRIDGE - src/bridge.rs
 // Copyright (C) 2026 JuanenRac (Electro Hobby 3D) <electrohobby3d@gmail.com>
-// GPL-3.0 - see LICENSE
+// GPL-3.0-or-later - see LICENSE
 // =============================================================================
 //! Real bidirectional routing: which sink a `JointCommand` actually
 //! reaches, and whether the safety interlock (`interlock.rs`) blocks it

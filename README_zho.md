@@ -9,10 +9,10 @@
 ### ⚡ 用于真实与虚拟同步的硬件在环接口
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Licencia-GPL%203.0-blue.svg" alt="GPL 3.0">
+  <img src="https://img.shields.io/badge/Licencia-GPL%203.0--or--later-blue.svg" alt="GPL 3.0 or later">
   <img src="https://img.shields.io/badge/Protocol-WebSocket%20%2F%20gRPC-yellow.svg" alt="Protocol">
   <img src="https://img.shields.io/badge/Feature-Zero--Latency%20Sync-green.svg" alt="Sync">
-  <img src="https://img.shields.io/badge/Stage-Established%20v0-brightgreen.svg" alt="Established v0 stage">
+  <img src="https://img.shields.io/badge/Stage-%E5%8A%9F%E8%83%BD%E9%98%B6%E6%AE%B5%20v0-yellow.svg" alt="功能阶段 v0">
 </p>
 
 ---
@@ -289,4 +289,4 @@ gRPC/WebSocket 传输层工作开始时还会添加什么，请见其内部的�
 📺 [youtube.com/@electrohobby3d](https://youtube.com/@electrohobby3d)
 
 ## 📜 许可证
-GPL-3.0 —— 详见 LICENSE。
+GPL-3.0-or-later —— 详见 LICENSE。

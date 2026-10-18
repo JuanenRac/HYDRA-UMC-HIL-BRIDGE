@@ -9,10 +9,10 @@
 ### ⚡ 実際と仮想の同期のためのハードウェア・イン・ザ・ループインターフェース
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Licencia-GPL%203.0-blue.svg" alt="GPL 3.0">
+  <img src="https://img.shields.io/badge/Licencia-GPL%203.0--or--later-blue.svg" alt="GPL 3.0 or later">
   <img src="https://img.shields.io/badge/Protocol-WebSocket%20%2F%20gRPC-yellow.svg" alt="Protocol">
   <img src="https://img.shields.io/badge/Feature-Zero--Latency%20Sync-green.svg" alt="Sync">
-  <img src="https://img.shields.io/badge/Stage-Established%20v0-brightgreen.svg" alt="Established v0 stage">
+  <img src="https://img.shields.io/badge/Stage-%E6%A9%9F%E8%83%BD%E6%AE%B5%E9%9A%8E%20v0-yellow.svg" alt="機能段階 v0">
 </p>
 
 ---
@@ -301,4 +301,4 @@ curl -X POST http://127.0.0.1:8113/route \
 📺 [youtube.com/@electrohobby3d](https://youtube.com/@electrohobby3d)
 
 ## 📜 ライセンス
-GPL-3.0 —— 詳細は LICENSE を参照してください。
+GPL-3.0-or-later —— 詳細は LICENSE を参照してください。

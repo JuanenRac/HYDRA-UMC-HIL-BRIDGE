@@ -19,6 +19,12 @@ semantic-versioning judgment calls:
 
 ---
 
+## [0.0.9] - Maturity lowered to functional
+
+- Build version synchronized with `hydra-umc.project.json` and the repository-native version source.
+- The licence is written as GPL-3.0-or-later in every header and in the package metadata.
+- Maturity is functional: nothing here has been verified on real hardware yet.
+
 ## [0.0.8] - The HTTP API refuses browser-style requests and invalid commands
 
 - `POST` requests must be declared as `Content-Type: application/json` (`415` otherwise) and are refused with `403` when they carry an `Origin` header: a web page could send a "simple" cross-site `POST` (`text/plain`, no preflight) to the loopback port and reach `/route`.
