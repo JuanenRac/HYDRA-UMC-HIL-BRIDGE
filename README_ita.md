@@ -17,6 +17,16 @@
 
 ---
 
+## 📋 In breve
+
+| | |
+|---|---|
+| Versione | `0.0.9` |
+| Maturità | Funzionale |
+| Tecnologia | Rust / hardware-in-the-loop I/O |
+| Destinazione | Il Raspberry Pi CM5 di una cella HYDRA-UMC |
+| Su hardware reale | Solo simulato: provato con emulatori, test double o simulatori; per questa versione non risulta alcuna esecuzione su hardware reale |
+
 ## 1. 🛠️ PANORAMICA TECNICA
 
 **HYDRA-UMC-HIL-BRIDGE** è l'arteria di comunicazione che abilita la funzionalità Hardware-in-the-Loop (HIL). Sincronizza lo stato tra i controller fisici e il motore Digital Twin in tempo reale.
