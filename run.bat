@@ -28,6 +28,10 @@ echo.
 REM HYDRA_UMC_SCRIPT_STANDARD_BANNER_END
 REM Forwards all arguments (e.g. "run.bat route --mode real --joint j1 --position 0.5").
 setlocal
+rem Keep the window open for people, never in automation (CI / HYDRA_UMC_CI).
+set "KEEP_OPEN=pause"
+if defined CI set "KEEP_OPEN=ver >nul"
+if "%HYDRA_UMC_CI%"=="1" set "KEEP_OPEN=ver >nul"
 cd /d "%~dp0"
 
 set BIN=target\release\hydra-umc-hil-bridge.exe
@@ -39,5 +43,5 @@ if not exist "%BIN%" (
 
 "%BIN%" %*
 set EXIT_CODE=%errorlevel%
-pause
+%KEEP_OPEN%
 exit /b %EXIT_CODE%
