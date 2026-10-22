@@ -5,17 +5,17 @@
 # GPL-3.0-or-later - see LICENSE
 #
 # Applies the ecosystem-wide "odometer" version bump to this project's own
-# Cargo.toml before every real build: PATCH goes up by 1; if that would push
-# PATCH past 9, it resets to 0 and MINOR goes up by 1 instead (e.g.
-# 0.0.9 -> 0.1.0), cascading the same carry from MINOR into MAJOR if MINOR
-# also passes 9. MAJOR is otherwise never touched by this script - a
-# deliberate manual-only decision, same convention across the ecosystem (see
+# Cargo.toml on an explicit bump: PATCH goes up by 1; if that would push PATCH
+# past 9, it resets to 0 and MINOR goes up by 1 instead (e.g. 0.0.9 -> 0.1.0),
+# cascading the same carry from MINOR into MAJOR if MINOR also passes 9. MAJOR
+# is otherwise never touched by this script - a deliberate manual-only
+# decision, same convention across the ecosystem (see
 # HYDRA-UMC-VISION-STREAMER/bump_version.py, which applies the identical rule
 # to a pyproject.toml instead of a Cargo.toml).
 #
-# Called from build.sh/build.bat right before `cargo build`, so every real
-# build carries a version 1 higher than the last real build. Also runs
-# standalone (`python bump_version.py`), which is how it gets verified in
+# Run only by the explicit bump command (`python tools/hydra_project_tool.py
+# bump`); building never runs it, so a build never changes a version. Also
+# runs standalone (`python bump_version.py`), which is how it gets verified in
 # isolation - stdlib only, no third-party imports.
 # =============================================================================
 from __future__ import annotations

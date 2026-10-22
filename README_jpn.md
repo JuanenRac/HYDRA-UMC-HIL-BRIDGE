@@ -106,7 +106,7 @@ HYDRA-UMC-HIL-BRIDGE/
 │   ├── build_test.py    # バージョンを増やさないビルドチェック
 │   └── ci_validate.py   # CI が使用するマニフェスト/CHANGELOG/ドキュメント検証
 ├── Cargo.toml           # パッケージメタデータ、依存関係、オドメーターバージョン
-├── bump_version.py      # ネイティブバージョンのオドメーター式インクリメント（build.sh/.bat が使用）
+├── bump_version.py      # オドメーター式バージョンインクリメント（明示的な `bump` コマンドのみが実行）
 ├── bump_manifest_version.py # hydra-umc.project.json のバージョンをネイティブ版と同期(--sync)
 ├── build.sh / build.bat # バージョンを増加させ、`cargo test`、その後 `cargo build --release` を実行
 ├── build-test.sh / build-test.bat # バージョンを増やさないビルドチェック
@@ -122,7 +122,7 @@ Rust ツールチェーン（`cargo`/`rustc`、[rustup](https://rustup.rs) 経�
 
 ```bash
 # Linux / macOS
-./build.sh   # オドメーター式バージョンインクリメント、`cargo test`（47 件のテスト）、その後 `cargo build --release`
+./build.sh   # 、`cargo test`（47 件のテスト）、その後 `cargo build --release`
 ./run.sh     # target/release/hydra-umc-hil-bridge を実行し、名前 + バージョン + 役割を表示
 ```
 
@@ -132,9 +132,7 @@ build.bat
 run.bat
 ```
 
-`build.sh`/`build.bat` は、エコシステムの「オドメーター」規則
-（PATCH+1、9 を超えると MINOR に繰り上がる）に従って本プロジェクト
-自身の `Cargo.toml` のバージョンを増加させ、実際のテストスイートを
+`build.sh`/`build.bat` はバージョンを変更せず（上げるのは `python tools/hydra_project_tool.py bump` だけです）、実際のテストスイートを
 実行し、その後 release バイナリをビルドします。
 
 実際の `route` および `mirror` サブコマンド：

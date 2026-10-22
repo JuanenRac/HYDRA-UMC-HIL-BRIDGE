@@ -97,9 +97,9 @@ HYDRA-UMC-HIL-BRIDGE/
 │   ├── build_test.py    # Verificação de compilação sem versão
 │   └── ci_validate.py   # Validação de manifesto/CHANGELOG/docs usada pelo CI
 ├── Cargo.toml           # Metadados do pacote, dependências, versão em odómetro
-├── bump_version.py      # Subida de versão nativa em odómetro (usada por build.sh/.bat)
+├── bump_version.py      # Subida de versão ao estilo conta-quilómetros (executada só pelo comando `bump` explícito)
 ├── bump_manifest_version.py # Sincroniza a versão de hydra-umc.project.json com a nativa (--sync)
-├── build.sh / build.bat # Sobe a versão, `cargo test`, depois `cargo build --release`
+├── build.sh / build.bat # Valida e compila (compilar nunca altera a versão)
 ├── build-test.sh / build-test.bat # Verificação de compilação sem versão (sem CHANGELOG/subida de versão)
 └── run.sh / run.bat     # Executa o binário de lançamento compilado (reencaminha argumentos)
 ```
@@ -112,7 +112,7 @@ Requer a cadeia de ferramentas Rust (`cargo`/`rustc`, instale com o [rustup](htt
 
 ```bash
 # Linux / macOS
-./build.sh   # subida de versão em odómetro, `cargo test` (47 testes), depois `cargo build --release`
+./build.sh   # `cargo test` (47 testes), depois `cargo build --release`
 ./run.sh     # executa target/release/hydra-umc-hil-bridge, imprime nome + versão + função
 ```
 
@@ -122,7 +122,7 @@ build.bat
 run.bat
 ```
 
-O `build.sh`/`build.bat` sobem a versão do `Cargo.toml` deste projeto seguindo a regra de "odómetro" do ecossistema (PATCH+1, transbordando para MINOR depois do 9), executam a suite de testes real e compilam depois um binário de lançamento.
+`build.sh`/`build.bat` nunca alteram a versão (só `python tools/hydra_project_tool.py bump` a sobe), executam a suite de testes real e compilam depois um binário de lançamento.
 
 Os subcomandos reais `route` e `mirror`:
 
