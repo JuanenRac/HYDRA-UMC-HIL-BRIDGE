@@ -97,7 +97,6 @@ All notable changes to this project are documented here.
 - Real verification beyond the test suite: `route --transport-timeout-ms 100 --transport-latency-ms 500` and `--transport-disconnected` both correctly report `TRANSPORT FAILURE` with exit code 3, never `SENT`.
 
 ## [0.0.2] - Real v0 mode-based routing and safety interlock
-### Added
 - `protocol.rs` - real `JointCommand` and `Mode` (Real/Simulation) types.
 - `interlock.rs` - `assess_interlock()`: the real code-level enforcement of the "Safety Interlock" feature this README already advertised - blocks a real-hardware-bound command whenever a `TwinRiskReport` says a collision is imminent, trusting the twin's own conclusion rather than re-deriving one from a raw distance threshold. Advisory-blocking only, in the same spirit as HYDRA-UMC-SAFETY-ZONES's detect-vs-enforce boundary: this bridge can refuse to forward a command, physical enforcement still belongs to the firmware alone.
 - `bridge.rs` - `Bridge::route_command()`: real mode-based routing, interlock-gated only in `Real` mode (`Simulation` mode is never gated - the point of simulating is to see a predicted collision, not have it swallowed). `Bridge::mirror_command()`: unconditional real-vs-virtual shadowing. `CommandSink` trait + `RecordingSink`, the one real (non-transmitting, honestly so) implementation today - no gRPC/WebSocket transport exists yet.
@@ -105,7 +104,6 @@ All notable changes to this project are documented here.
 - 7 new real tests covering interlock decisions (allow/block/trusting the twin's own flag) and routing (simulation always sent, real gated, blocked commands never reach the real sink, mirroring reaches its sink regardless of mode).
 - Real verification beyond the test suite: ran `route`/`mirror` for all 4 real outcomes (real-mode sent, real-mode blocked, simulation-mode sent ungated despite risk, mirrored) and confirmed each printed message and exit code.
 
-### Fixed
 - `build.sh` called `bump_manifest_version.py` (no `--sync`) as its very first line, before also calling `bump_version.py` later - the same double-bump pattern seen in other Rust projects in the ecosystem. Rewritten to bump the native version first, then sync the manifest. `build.sh`/`build.bat` now also run `cargo test` and use the ecosystem's no-autoclose pattern for the first time in this project; `run.sh`/`run.bat` now forward arguments.
 
 ## [0.0.1] - Initial scaffolding
