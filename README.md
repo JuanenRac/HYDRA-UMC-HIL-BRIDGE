@@ -36,6 +36,7 @@
 It allows developers to send commands from any interface (App, Suite, Studio) to the simulator as if it were a physical robot, and conversely, it can mirror a physical robot's movements into the virtual world for remote supervision and digital twin shadowing.
 
 ### Key Features:
+* 🔑 **Optional Bearer token:** on loopback the API needs no token; away from loopback `serve` refuses to start without one (`--token-file` or `HYDRA_UMC_HIL_BRIDGE_TOKEN`). With a token set, every request must send `Authorization: Bearer <token>` (constant-time comparison); only `GET /stats`, the health path of the manifest, stays open. *(implemented)*
 * 🛡️ **Safety Interlock (v0):** the real `route` subcommand blocks a real-hardware-bound command whenever a twin risk report says a collision is imminent - see "Honesty check" below for exactly what runs today.
 * 🧯 **The interlock fails closed (v0):** in `real` mode a command is forwarded only with a twin risk report that says the path is clear: no report blocks it (omitting it used to default to "no collision", which was enough to reach the hardware), a NaN distance blocks it, and so does less than 5 cm of clearance even when the twin did not raise `collision_imminent` (`MIN_CLEARANCE_M`). `--clear-distance METERS` supplies a clear report to the CLI; request bodies over 16 KB are refused with `413`. A report that the caller sends in the same request is still the caller's word until the twin transport exists. *(implemented)*
 * 🌉 **Bidirectional Bridge (v0, no transport yet):** real mode-based routing (Real/Simulation) and real unconditional mirroring exist; there is no real gRPC/WebSocket connection to an actual HYDRA-UMC-TWIN or HYDRA-UMC controller yet.
@@ -117,7 +118,7 @@ Requires the Rust toolchain (`cargo`/`rustc`, install via [rustup](https://rustu
 
 ```bash
 # Linux / macOS
-./build.sh   # `cargo test` (47 tests), then `cargo build --release`
+./build.sh   # `cargo test` (54 tests), then `cargo build --release`
 ./run.sh     # runs target/release/hydra-umc-hil-bridge, prints name + version + role
 ```
 

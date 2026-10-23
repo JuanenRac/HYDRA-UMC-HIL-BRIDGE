@@ -36,6 +36,7 @@ O **HYDRA-UMC-HIL-BRIDGE** é a artéria de comunicação destinada a permitir a
 Permite aos programadores enviar comandos de qualquer interface (App, Suite, Studio) ao simulador como se fosse um robô físico e, inversamente, pode espelhar os movimentos de um robô físico no mundo virtual para supervisão remota e sombreamento de gémeo digital.
 
 ### Funcionalidades principais:
+* 🔑 **Token Bearer opcional:** em loopback a API não precisa de token; fora do loopback `serve` recusa-se a arrancar sem um (`--token-file` ou `HYDRA_UMC_HIL_BRIDGE_TOKEN`). Com um token definido, todo o pedido tem de enviar `Authorization: Bearer <token>` (comparação em tempo constante); só `GET /stats`, o caminho de saúde do manifesto, fica aberto. *(implementado)*
 * 🛡️ **Interbloqueio de segurança (v0):** o subcomando real `route` bloqueia um comando destinado a hardware real sempre que um relatório de risco do gémeo diga que uma colisão é iminente - veja a "Verificação de honestidade" abaixo para saber exatamente o que corre hoje.
 * 🧯 **O interbloqueio falha em fechado (v0):** em modo `real` um comando só é reencaminhado com um relatório de risco do gémeo que diga que o caminho está livre: sem relatório fica bloqueado (omiti-lo equivalia a "sem colisão", o que bastava para chegar ao hardware), uma distância NaN bloqueia-o, e também menos de 5 cm de folga mesmo que o gémeo não tenha levantado `collision_imminent` (`MIN_CLEARANCE_M`). `--clear-distance METROS` dá à CLI um relatório de caminho livre; os corpos de pedido com mais de 16 KB são recusados com `413`. Um relatório que o chamador envia no mesmo pedido continua a ser palavra do chamador até existir o transporte do gémeo. *(implementado)*
 * 🌉 **Ponte bidirecional (v0, ainda sem transporte):** existem o encaminhamento real por modo (Real/Simulação) e o espelhamento incondicional real; ainda não há ligação gRPC/WebSocket real a um HYDRA-UMC-TWIN ou controlador HYDRA-UMC verdadeiros.
@@ -112,7 +113,7 @@ Requer a cadeia de ferramentas Rust (`cargo`/`rustc`, instale com o [rustup](htt
 
 ```bash
 # Linux / macOS
-./build.sh   # `cargo test` (47 testes), depois `cargo build --release`
+./build.sh   # `cargo test` (54 testes), depois `cargo build --release`
 ./run.sh     # executa target/release/hydra-umc-hil-bridge, imprime nome + versão + função
 ```
 

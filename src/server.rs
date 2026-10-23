@@ -17,6 +17,7 @@ use serde::Deserialize;
 use serde_json::json;
 use tiny_http::{Header, Method, Response, Server};
 
+use crate::access::bearer_matches;
 use crate::bridge::{Bridge, CommandSink, RecordingSink, RouteOutcome, SimulatedTransport};
 use crate::interlock::TwinRiskReport;
 use crate::protocol::{JointCommand, Mode};
@@ -132,6 +133,7 @@ struct Stats {
     mirror_failures: u64,
     malformed_requests: u64,
     not_found: u64,
+    unauthorized: u64,
 }
 
 pub fn bind(addr: &str) -> std::io::Result<Server> {
@@ -141,10 +143,42 @@ pub fn bind(addr: &str) -> std::io::Result<Server> {
 /// `fault_injection` lets a request pick a simulated transport (disconnected
 /// link, latency, timeout). It is a test facility: without it the field is
 /// refused, so a deployed server cannot be told to fake a transport fault.
+#[cfg(test)]
 pub fn run(server: Server, fault_injection: bool) {
+    run_with_token(server, fault_injection, None);
+}
+
+/// Like `run`, with an optional Bearer token: when set, every request except `GET /stats` (the health path of the manifest) must
+/// carry it.
+pub fn run_with_token(server: Server, fault_injection: bool, token: Option<String>) {
     let mut stats = Stats::default();
     for mut request in server.incoming_requests() {
         let path = request.url().split('?').next().unwrap_or("").to_string();
+
+        if let Some(expected) = &token {
+            let health_probe = path == "/stats" && request.method() == &Method::Get;
+            let presented = request
+                .headers()
+                .iter()
+                .find(|h| {
+                    h.field
+                        .as_str()
+                        .as_str()
+                        .eq_ignore_ascii_case("authorization")
+                })
+                .map(|h| h.value.as_str().to_string());
+            if !health_probe && !bearer_matches(presented.as_deref(), expected) {
+                stats.unauthorized += 1;
+                let response = Response::from_string(
+                    json!({"error": "a valid bearer token is required"}).to_string(),
+                )
+                .with_status_code(401)
+                .with_header(json_header())
+                .with_header(header("WWW-Authenticate", "Bearer"));
+                let _ = request.respond(response);
+                continue;
+            }
+        }
 
         if path == "/stats" && request.method() == &Method::Get {
             write_json(
@@ -160,6 +194,7 @@ pub fn run(server: Server, fault_injection: bool) {
                     "mirrorFailures": stats.mirror_failures,
                     "malformedRequests": stats.malformed_requests,
                     "notFound": stats.not_found,
+                    "unauthorized": stats.unauthorized,
                 }),
             );
             continue;
@@ -643,5 +678,81 @@ mod tests {
         let port = start_test_server();
         let (status, _) = get(port, "/nope");
         assert_eq!(status, 404);
+    }
+
+    const TEST_TOKEN: &str = "a-long-random-token-1234";
+
+    fn start_test_server_with_token() -> u16 {
+        let server = bind("127.0.0.1:0").expect("bind on an OS-assigned port must succeed");
+        let port = server
+            .server_addr()
+            .to_ip()
+            .expect("tiny_http always binds a real IP socket for an http:// server")
+            .port();
+        thread::spawn(move || run_with_token(server, true, Some(TEST_TOKEN.to_string())));
+        port
+    }
+
+    fn get_status_with_headers(port: u16, path: &str, extra_headers: &str) -> u16 {
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect must succeed");
+        let request = format!(
+            "GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n{extra_headers}Connection: close\r\n\r\n"
+        );
+        stream.write_all(request.as_bytes()).unwrap();
+        let mut raw = String::new();
+        stream.read_to_string(&mut raw).unwrap();
+        raw.lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0)
+    }
+
+    #[test]
+    fn with_a_token_a_request_without_it_is_refused_but_the_health_path_stays_open() {
+        let port = start_test_server_with_token();
+        // the health path of the manifest is open for the service registry
+        assert_eq!(get_status_with_headers(port, "/stats", ""), 200);
+        // everything else needs the token, even a path that does not exist
+        assert_eq!(get_status_with_headers(port, "/nope", ""), 401);
+        let body = r#"{"mode":"simulation","joint":"shoulder","position":0.5}"#;
+        let json = "Content-Type: application/json\r\n";
+        assert_eq!(post_raw(port, "/route", json, body.as_bytes()), 401);
+        assert_eq!(post_raw(port, "/mirror", json, body.as_bytes()), 401);
+        // a wrong token and a wrong scheme are refused too
+        let wrong = format!("{json}Authorization: Bearer wrong-token-0000000\r\n");
+        assert_eq!(post_raw(port, "/route", &wrong, body.as_bytes()), 401);
+        let basic = format!("{json}Authorization: Basic {TEST_TOKEN}\r\n");
+        assert_eq!(post_raw(port, "/route", &basic, body.as_bytes()), 401);
+    }
+
+    #[test]
+    fn with_a_token_the_right_bearer_header_reaches_the_routes() {
+        let port = start_test_server_with_token();
+        let body = r#"{"mode":"simulation","joint":"shoulder","position":0.5}"#;
+        let ok =
+            format!("Content-Type: application/json\r\nAuthorization: Bearer {TEST_TOKEN}\r\n");
+        assert_eq!(post_raw(port, "/route", &ok, body.as_bytes()), 200);
+        // the header name is case-insensitive
+        let lower =
+            format!("Content-Type: application/json\r\nauthorization: Bearer {TEST_TOKEN}\r\n");
+        assert_eq!(post_raw(port, "/mirror", &lower, body.as_bytes()), 200);
+        assert_eq!(
+            get_status_with_headers(
+                port,
+                "/nope",
+                &format!("Authorization: Bearer {TEST_TOKEN}\r\n")
+            ),
+            404
+        );
+    }
+
+    #[test]
+    fn refused_requests_are_counted() {
+        let port = start_test_server_with_token();
+        get_status_with_headers(port, "/nope", "");
+        get_status_with_headers(port, "/nope", "");
+        let (_, body) = get(port, "/stats");
+        assert!(body.contains("\"unauthorized\":2"), "{body}");
     }
 }

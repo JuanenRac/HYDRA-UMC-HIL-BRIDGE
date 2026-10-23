@@ -36,6 +36,7 @@
 Sie ermöglicht es Entwicklern, Befehle von jeder Schnittstelle (App, Suite, Studio) an den Simulator zu senden, als wäre er ein physischer Roboter, und umgekehrt kann sie die Bewegungen eines physischen Roboters in die virtuelle Welt spiegeln, zur Fernüberwachung und zum Shadowing des digitalen Zwillings.
 
 ### Hauptmerkmale:
+* 🔑 **Optionales Bearer-Token:** auf Loopback braucht die API kein Token; außerhalb von Loopback startet `serve` ohne eines nicht (`--token-file` oder `HYDRA_UMC_HIL_BRIDGE_TOKEN`). Ist ein Token gesetzt, muss jede Anfrage `Authorization: Bearer <token>` senden (Vergleich in konstanter Zeit); nur `GET /stats`, der Health-Pfad des Manifests, bleibt offen. *(implementiert)*
 * 🛡️ **Sicherheitsverriegelung (v0):** der echte Subbefehl `route` blockiert einen für echte Hardware bestimmten Befehl, sobald ein Zwillings-Risikobericht eine bevorstehende Kollision meldet - siehe "Ehrlichkeitscheck" unten für das, was heute genau läuft.
 * 🧯 **Die Verriegelung fällt geschlossen aus (v0):** Im Modus `real` wird ein Befehl nur mit einem Zwillings-Risikobericht weitergeleitet, der den Weg als frei meldet: ohne Bericht wird er blockiert (ihn wegzulassen galt früher als "keine Kollision" und genügte, um die Hardware zu erreichen), eine NaN-Distanz blockiert ihn, ebenso weniger als 5 cm Abstand, auch wenn der Zwilling `collision_imminent` nicht gesetzt hat (`MIN_CLEARANCE_M`). `--clear-distance METER` liefert der CLI einen Frei-Bericht; Anfragekörper über 16 KB werden mit `413` abgelehnt. Ein Bericht, den der Aufrufer in derselben Anfrage mitschickt, bleibt bis zum Zwillingstransport das Wort des Aufrufers. *(implementiert)*
 * 🌉 **Bidirektionale Brücke (v0, noch ohne Transport):** echtes modusbasiertes Routing (Real/Simulation) und echtes, bedingungsloses Spiegeln existieren bereits; es gibt noch keine echte gRPC/WebSocket-Verbindung zu einem echten HYDRA-UMC-TWIN oder HYDRA-UMC-Controller.
@@ -118,7 +119,7 @@ Erfordert die Rust-Toolchain (`cargo`/`rustc`, Installation via [rustup](https:/
 
 ```bash
 # Linux / macOS
-./build.sh   # `cargo test` (47 Tests), dann `cargo build --release`
+./build.sh   # `cargo test` (54 Tests), dann `cargo build --release`
 ./run.sh     # führt target/release/hydra-umc-hil-bridge aus, gibt Name + Version + Rolle aus
 ```
 

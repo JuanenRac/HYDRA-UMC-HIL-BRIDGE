@@ -4,6 +4,7 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+- **Optional Bearer token for the HTTP API.** `serve --token-file FILE` (or `HYDRA_UMC_HIL_BRIDGE_TOKEN`, at least 16 characters) makes every request but `GET /stats` carry `Authorization: Bearer <token>` (constant-time comparison); `GET /stats` reports how many requests were refused. On loopback no token is needed; any other address is refused at start without one.
 - The manifest declares the health route of the service (`/stats`), so the service registry, the ecosystem status of the server and the watchdog know where to probe it.
 - Building no longer changes the version; raising it is the explicit `bump` command (`python tools/hydra_project_tool.py bump`). The build scripts only report the version they built, and CI fails if a build script runs a bump.
 - The banner follows the animated style of the ecosystem banners, with the name, the kind and the technologies of the project.

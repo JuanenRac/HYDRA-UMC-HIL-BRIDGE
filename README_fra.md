@@ -36,6 +36,7 @@
 Il permet aux développeurs d'envoyer des commandes depuis n'importe quelle interface (App, Suite, Studio) au simulateur comme s'il s'agissait d'un robot physique, et inversement, il peut refléter les mouvements d'un robot physique dans le monde virtuel pour une supervision à distance et un suivi (shadowing) du jumeau numérique.
 
 ### Caractéristiques principales :
+* 🔑 **Jeton Bearer optionnel :** sur loopback l'API n'a pas besoin de jeton ; hors loopback `serve` refuse de démarrer sans (`--token-file` ou `HYDRA_UMC_HIL_BRIDGE_TOKEN`). Avec un jeton configuré, chaque requête doit envoyer `Authorization: Bearer <token>` (comparaison en temps constant) ; seul `GET /stats`, le chemin de santé du manifeste, reste ouvert. *(implémenté)*
 * 🛡️ **Verrouillage de sécurité (v0) :** le vrai sous-commande `route` bloque une commande destinée au matériel réel dès qu'un rapport de risque du jumeau signale une collision imminente - voir « Vérification d'honnêteté » ci-dessous pour ce qui fonctionne exactement aujourd'hui.
 * 🧯 **L'interverrouillage échoue en fermé (v0) :** en mode `real`, une commande n'est transmise qu'avec un rapport de risque du jumeau indiquant que la voie est libre : sans rapport elle est bloquée (l'omettre valait « pas de collision », ce qui suffisait pour atteindre le matériel), une distance NaN la bloque, tout comme moins de 5 cm de dégagement même si le jumeau n'a pas levé `collision_imminent` (`MIN_CLEARANCE_M`). `--clear-distance MÈTRES` fournit à la CLI un rapport de voie libre ; les corps de requête de plus de 16 Ko sont refusés avec `413`. Un rapport que l'appelant envoie dans la même requête reste la parole de l'appelant tant que le transport du jumeau n'existe pas. *(implémenté)*
 * 🌉 **Pont bidirectionnel (v0, sans transport pour l'instant) :** un vrai acheminement basé sur le mode (Réel/Simulation) et une vraie mise en miroir inconditionnelle existent ; il n'y a encore aucune vraie connexion gRPC/WebSocket vers un vrai HYDRA-UMC-TWIN ou contrôleur HYDRA-UMC.
@@ -118,7 +119,7 @@ Nécessite la chaîne d'outils Rust (`cargo`/`rustc`, à installer via [rustup](
 
 ```bash
 # Linux / macOS
-./build.sh   # `cargo test` (47 tests), puis `cargo build --release`
+./build.sh   # `cargo test` (54 tests), puis `cargo build --release`
 ./run.sh     # exécute target/release/hydra-umc-hil-bridge, affiche nom + version + rôle
 ```
 

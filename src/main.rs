@@ -15,6 +15,7 @@
 //! module docs for what is still out of scope (any real gRPC/WebSocket
 //! transport - see `Cargo.toml`).
 
+mod access;
 mod bridge;
 mod interlock;
 mod protocol;
@@ -193,15 +194,37 @@ fn run_serve(args: &[String]) -> ExitCode {
     let port = find_flag(args, "--port").unwrap_or_else(|| "8113".to_string());
     let bind_addr = format!("{addr}:{port}");
 
+    let token = match access::load_token(
+        find_flag(args, "--token-file").as_deref(),
+        env::var(access::TOKEN_ENV).ok().as_deref(),
+    ) {
+        Ok(token) => token,
+        Err(e) => {
+            eprintln!("[hil-bridge] fatal: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    if let Some(problem) = access::bind_problem(&addr, &token) {
+        eprintln!("[hil-bridge] fatal: {problem}");
+        return ExitCode::from(2);
+    }
+
     match server::bind(&bind_addr) {
         Ok(bound) => {
-            eprintln!("[hil-bridge] HTTP API listening on {bind_addr}");
+            eprintln!(
+                "[hil-bridge] HTTP API listening on {bind_addr} ({})",
+                if token.is_some() {
+                    "Bearer token required"
+                } else {
+                    "no token, loopback only"
+                }
+            );
             eprintln!("[hil-bridge] POST /route, POST /mirror, GET /stats");
             let fault_injection = has_flag(args, "--fault-injection");
             if fault_injection {
                 eprintln!("[hil-bridge] simulated transport fault injection is ENABLED");
             }
-            server::run(bound, fault_injection);
+            server::run_with_token(bound, fault_injection, token);
             ExitCode::SUCCESS
         }
         Err(e) => {

@@ -38,6 +38,7 @@
 虚拟世界中，用于远程监控和数字孪生影子跟随。
 
 ### 关键特性：
+* 🔑 **可选的 Bearer 令牌：** 在回环地址上 API 不需要令牌；在非回环地址上，没有令牌 `serve` 就拒绝启动（`--token-file` 或 `HYDRA_UMC_HIL_BRIDGE_TOKEN`）。设置令牌后，每个请求都必须发送 `Authorization: Bearer <token>`（恒定时间比较）；只有清单声明的健康路径 `GET /stats` 保持开放。*(已实现)*
 * 🛡️ **安全联锁（v0）：** 真实的 `route` 子命令会在孪生系统的风险报告指出碰撞即将发生时，阻止发往真实硬件的指令——下方"诚实说明"给出了今天到底能跑什么。
 * 🧯 **联锁采用故障关闭（v0）：** 在 `real` 模式下，只有带有表明路径畅通的孪生风险报告时才会转发命令：没有报告就会被阻止（以前省略报告等于“无碰撞”，足以到达硬件），距离为 NaN 会被阻止，即使孪生没有设置 `collision_imminent`，间隙不足 5 厘米也会被阻止（`MIN_CLEARANCE_M`）。`--clear-distance 米数` 可向 CLI 提供畅通报告；超过 16 KB 的请求体会被以 `413` 拒绝。在孪生传输实现之前，调用方在同一请求中发送的报告仍只是调用方的一面之词。*（已实现）*
 * 🌉 **双向桥接（v0，尚无传输层）：** 真实的、基于模式（真实/仿真）的路由和真实的、无条件的镜像已经存在；目前还没有连接到真正的 HYDRA-UMC-TWIN 或 HYDRA-UMC 控制器的真实 gRPC/WebSocket 连接。
@@ -119,7 +120,7 @@ HYDRA-UMC-HIL-BRIDGE/
 
 ```bash
 # Linux / macOS
-./build.sh   # 、`cargo test`（47 个测试），然后执行 `cargo build --release`
+./build.sh   # 、`cargo test`（54 个测试），然后执行 `cargo build --release`
 ./run.sh     # 运行 target/release/hydra-umc-hil-bridge，打印名称 + 版本 + 角色
 ```
 
