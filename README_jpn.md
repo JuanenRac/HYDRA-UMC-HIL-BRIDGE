@@ -23,7 +23,7 @@
 
 | | |
 |---|---|
-| バージョン | `0.0.9` |
+| バージョン | `0.1.0` |
 | 成熟度 | 機能する |
 | 技術 | Rust / hardware-in-the-loop I/O |
 | 対象 | HYDRA-UMC セルの Raspberry Pi CM5 |

@@ -23,7 +23,7 @@
 
 | | |
 |---|---|
-| Version | `0.0.9` |
+| Version | `0.1.0` |
 | Reifegrad | Funktionsfähig |
 | Technik | Rust / hardware-in-the-loop I/O |
 | Ziel | Der Raspberry Pi CM5 einer HYDRA-UMC-Zelle |

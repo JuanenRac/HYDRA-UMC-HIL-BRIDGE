@@ -23,7 +23,7 @@
 
 | | |
 |---|---|
-| 版本 | `0.0.9` |
+| 版本 | `0.1.0` |
 | 成熟度 | 可用 |
 | 技术栈 | Rust / hardware-in-the-loop I/O |
 | 目标 | HYDRA-UMC 工作单元的 Raspberry Pi CM5 |

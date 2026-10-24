@@ -23,7 +23,7 @@
 
 | | |
 |---|---|
-| Version | `0.0.9` |
+| Version | `0.1.0` |
 | Maturité | Fonctionnel |
 | Technologie | Rust / hardware-in-the-loop I/O |
 | Cible | Le Raspberry Pi CM5 d'une cellule HYDRA-UMC |
