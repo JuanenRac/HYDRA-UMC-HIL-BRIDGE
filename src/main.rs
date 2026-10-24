@@ -16,7 +16,9 @@
 //! transport - see `Cargo.toml`).
 
 mod access;
+mod audit;
 mod bridge;
+mod certificate;
 mod interlock;
 mod protocol;
 mod server;
@@ -189,6 +191,38 @@ fn run_mirror(args: &[String]) -> ExitCode {
     }
 }
 
+/// How the real mode is certified, from `--twin-public-key-file` (one 64-hex Ed25519 public key per line; also
+/// HYDRA_UMC_HIL_BRIDGE_TWIN_KEY_FILE), `--certificate-max-age-ms` (default 2000) and `--allow-unsigned-risk` (the bench setting; also
+/// HYDRA_UMC_HIL_BRIDGE_ALLOW_UNSIGNED_RISK=1). With none of them the real mode blocks every command.
+fn load_interlock(args: &[String]) -> Result<server::InterlockConfig, String> {
+    let mut config = server::InterlockConfig::default();
+    if let Some(path) = find_flag(args, "--twin-public-key-file")
+        .or_else(|| env::var("HYDRA_UMC_HIL_BRIDGE_TWIN_KEY_FILE").ok())
+    {
+        let text = std::fs::read_to_string(&path)
+            .map_err(|e| format!("cannot read the twin public key file: {e}"))?;
+        config.trusted_keys =
+            certificate::TrustedKeys::from_text(&text).map_err(|e| format!("{path}: {e}"))?;
+        if config.trusted_keys.is_empty() {
+            return Err(format!("{path} holds no public key"));
+        }
+    }
+    if let Some(text) = find_flag(args, "--certificate-max-age-ms") {
+        let age: u64 = text.parse().map_err(|_| {
+            "--certificate-max-age-ms must be a whole number of milliseconds".to_string()
+        })?;
+        if age == 0 || age > 60_000 {
+            return Err("--certificate-max-age-ms must be between 1 and 60000".to_string());
+        }
+        config.policy.max_age_ms = age;
+    }
+    config.allow_unsigned_risk = has_flag(args, "--allow-unsigned-risk")
+        || env::var("HYDRA_UMC_HIL_BRIDGE_ALLOW_UNSIGNED_RISK")
+            .map(|v| v == "1")
+            .unwrap_or(false);
+    Ok(config)
+}
+
 fn run_serve(args: &[String]) -> ExitCode {
     let addr = find_flag(args, "--addr").unwrap_or_else(|| "127.0.0.1".to_string());
     let port = find_flag(args, "--port").unwrap_or_else(|| "8113".to_string());
@@ -209,6 +243,18 @@ fn run_serve(args: &[String]) -> ExitCode {
         return ExitCode::from(2);
     }
 
+    let interlock = match load_interlock(args) {
+        Ok(interlock) => interlock,
+        Err(message) => {
+            eprintln!("[hil-bridge] fatal: {message}");
+            return ExitCode::from(2);
+        }
+    };
+    let audit_log = find_flag(args, "--audit-log")
+        .or_else(|| env::var("HYDRA_UMC_HIL_BRIDGE_AUDIT_LOG").ok())
+        .filter(|path| !path.trim().is_empty())
+        .map(std::path::PathBuf::from);
+
     match server::bind(&bind_addr) {
         Ok(bound) => {
             eprintln!(
@@ -219,12 +265,32 @@ fn run_serve(args: &[String]) -> ExitCode {
                     "no token, loopback only"
                 }
             );
-            eprintln!("[hil-bridge] POST /route, POST /mirror, GET /stats");
+            eprintln!("[hil-bridge] POST /route, POST /mirror, GET /stats, GET /audit");
             let fault_injection = has_flag(args, "--fault-injection");
             if fault_injection {
                 eprintln!("[hil-bridge] simulated transport fault injection is ENABLED");
             }
-            server::run_with_token(bound, fault_injection, token);
+            if interlock.trusted_keys.is_empty() {
+                eprintln!("[hil-bridge] no twin public key (--twin-public-key-file): the real mode blocks every command until one is configured");
+            } else {
+                eprintln!("[hil-bridge] real commands need a certificate from the twin: trusted key(s) {:?}, at most {} ms old", interlock.trusted_keys.key_ids(), interlock.policy.max_age_ms);
+            }
+            if interlock.allow_unsigned_risk {
+                eprintln!("[hil-bridge] WARNING: --allow-unsigned-risk is ON: a risk report written by the caller is believed in real mode (bench use only)");
+            }
+            match &audit_log {
+                Some(path) => eprintln!("[hil-bridge] every real order is recorded in {} before it is decided; if the record cannot be written the order is refused", path.display()),
+                None => eprintln!("[hil-bridge] no --audit-log: the last real orders are kept in memory only (GET /audit)"),
+            }
+            server::run_with_config(
+                bound,
+                server::ServerConfig {
+                    fault_injection,
+                    token,
+                    interlock,
+                    audit_log,
+                },
+            );
             ExitCode::SUCCESS
         }
         Err(e) => {

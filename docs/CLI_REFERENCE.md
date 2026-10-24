@@ -226,3 +226,22 @@ There is no real gRPC/WebSocket transport yet (see `Cargo.toml`) — every
 specifically so the bridge's fail-safe behavior (never reporting a dropped
 command as delivered) is exercisable today, without any real hardware or
 transport.
+
+## The certified real mode and the audit (`serve`)
+
+`POST /route` in `real` mode no longer gates on a `risk` the caller wrote. It reads `certificate` (see `docs/INTERLOCK_CERTIFICATE.md`): the risk report of the
+twin for exactly that joint and position, signed with the Ed25519 key of HYDRA-UMC-TWIN. A real command that has none, or whose certificate is forged, for another
+command, too old, from the future or already used, answers `200` with `{"BlockedByInterlock": {"reason": "..."}}`; a `certificate` object that is not shaped like one is a `400`.
+`mode: "simulation"` needs none.
+
+| Flag | Environment | Meaning |
+|---|---|---|
+| `--twin-public-key-file FILE` | `HYDRA_UMC_HIL_BRIDGE_TWIN_KEY_FILE` | The trusted public key(s) of the twin, one 64-hex per line. Without one every real command is blocked. |
+| `--certificate-max-age-ms N` | | Oldest certificate accepted, 1 to 60000 (default 2000). |
+| `--allow-unsigned-risk` | `HYDRA_UMC_HIL_BRIDGE_ALLOW_UNSIGNED_RISK=1` | Bench setting: believe the `risk` the caller wrote, in real mode. Off by default; announced at every start. |
+| `--audit-log FILE` | `HYDRA_UMC_HIL_BRIDGE_AUDIT_LOG` | Append every real order (`order` before it is decided, `outcome` after) as a JSON line; an order whose record cannot be written is refused with `503`. |
+
+`GET /audit` (behind the Bearer token when there is one) answers `{"records": [...last 200...], "file": bool}`. A record has `at_ms`, `phase`, `caller`
+(the `X-Hydra-Caller` header, or `unidentified`), `peer`, `authenticated`, `mode`, `joint`, `position`, `certificate_key_id`, `certificate_nonce` and, for an outcome, `kind`,
+`delivered` and `reason`. `GET /stats` adds `uncertified`, `auditFailures`, `certifiedMode` and `unsignedRiskAllowed`.
+
