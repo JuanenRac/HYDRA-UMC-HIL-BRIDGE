@@ -112,14 +112,20 @@ HYDRA-UMC-HIL-BRIDGE/
 │   ├── certificate.rs    # Verifies the Ed25519 risk certificate of the twin: command binding, freshness, single use
 │   ├── audit.rs          # Who sent each real order: JSON lines before the order is decided, last records in memory
 │   ├── server.rs         # Plain JSON/HTTP surface (tiny_http, blocking, no async runtime)
-│   └── main.rs           # Entry point + real `route`/`mirror` subcommands
+│   ├── main.rs           # Entry point + real `route`/`mirror` subcommands
+│   ├── access.rs         # Optional Bearer token for the HTTP API (none needed on loopback, mandatory away from it)
+│   ├── limits.rs         # The joint limits of the robot, read from its URDF
+│   └── watchdog.rs       # The consumer-side watchdog of the real commands (each command is only good for a short time)
 ├── docs/                # Documentation and integration guides
 ├── images/              # Media and diagrams
 ├── systemd/
 │   └── hydra-umc-hil-bridge.service # Local CM5 route/mirror API systemd unit
 ├── tools/
 │   ├── build_test.py    # Non-versioning build/compile check
-│   └── ci_validate.py   # Manifest/CHANGELOG/docs validation used by CI
+│   ├── ci_validate.py   # Manifest/CHANGELOG/docs validation used by CI
+│   ├── _doc_policy.py   # Documentation rules shared by the family (a copy of HYDRA-UMC-SDK's, kept in sync)
+│   ├── _readme_parity.py # Check that the eight READMEs share one structure (a copy of HYDRA-UMC-SDK's, kept in sync)
+│   └── hydra_project_tool.py # The same commands in every repository: validate, test, ci, version, status, bump
 ├── Cargo.toml           # Package metadata, dependencies, odometer version
 ├── bump_version.py      # Odometer-style version bump (run only by the explicit `bump` command)
 ├── bump_manifest_version.py # Syncs hydra-umc.project.json's version to the native one (--sync)

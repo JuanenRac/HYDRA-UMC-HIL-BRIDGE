@@ -116,14 +116,20 @@ HYDRA-UMC-HIL-BRIDGE/
 │   ├── certificate.rs    # 双子の Ed25519 リスク証明書を検証:コマンドへの紐付け、鮮度、一度だけの使用
 │   ├── audit.rs          # 実機への各指令を誰が送ったか:判断前に JSON 行を書き込み、直近の記録はメモリに保持
 │   ├── server.rs         # シンプルなJSON/HTTPサーフェス(tiny_http、ブロッキング、非同期ランタイムなし)
-│   └── main.rs           # エントリポイント + 実際の `route`/`mirror` サブコマンド
+│   ├── main.rs           # エントリポイント + 実際の `route`/`mirror` サブコマンド
+│   ├── access.rs         # HTTP API 用の任意の Bearer トークン (ループバックでは不要、それ以外では必須)
+│   ├── limits.rs         # ロボットの関節の上限・下限 (URDF から読み込み)
+│   └── watchdog.rs       # 実コマンドの受信側ウォッチドッグ (各コマンドは短時間しか有効でない)
 ├── docs/                # ドキュメントと統合ガイド
 ├── images/              # メディアと図表
 ├── systemd/
 │   └── hydra-umc-hil-bridge.service # ローカルCM5 route/mirror APIのsystemdユニット
 ├── tools/
 │   ├── build_test.py    # バージョンを増やさないビルドチェック
-│   └── ci_validate.py   # CI が使用するマニフェスト/CHANGELOG/ドキュメント検証
+│   ├── ci_validate.py   # CI が使用するマニフェスト/CHANGELOG/ドキュメント検証
+│   ├── _doc_policy.py   # ファミリー共通のドキュメント規則 (HYDRA-UMC-SDK のコピーで、同期を維持)
+│   ├── _readme_parity.py # 8つの README が同じ構造であることの検査 (HYDRA-UMC-SDK のコピーで、同期を維持)
+│   └── hydra_project_tool.py # すべてのリポジトリで共通のコマンド: validate、test、ci、version、status、bump
 ├── Cargo.toml           # パッケージメタデータ、依存関係、オドメーターバージョン
 ├── bump_version.py      # オドメーター式バージョンインクリメント（明示的な `bump` コマンドのみが実行）
 ├── bump_manifest_version.py # hydra-umc.project.json のバージョンをネイティブ版と同期(--sync)

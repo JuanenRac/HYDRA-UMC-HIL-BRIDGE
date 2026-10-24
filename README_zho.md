@@ -113,14 +113,20 @@ HYDRA-UMC-HIL-BRIDGE/
 │   ├── certificate.rs    # 验证孪生体的 Ed25519 风险证书:绑定命令、时效、仅限一次使用
 │   ├── audit.rs          # 谁发出了每条真实指令:裁决前写入 JSON 行,最近的记录保存在内存中
 │   ├── server.rs         # 简洁的 JSON/HTTP 接口(tiny_http,阻塞式,无异步运行时)
-│   └── main.rs           # 入口点 + 真实的 `route`/`mirror` 子命令
+│   ├── main.rs           # 入口点 + 真实的 `route`/`mirror` 子命令
+│   ├── access.rs         # HTTP API 的可选 Bearer 令牌 (本机回环无需,非回环时必须)
+│   ├── limits.rs         # 机器人的关节限位,从其 URDF 读取
+│   └── watchdog.rs       # 实际命令在消费端的看门狗 (每条命令只在短时间内有效)
 ├── docs/                # 文档与集成指南
 ├── images/              # 媒体与图表
 ├── systemd/
 │   └── hydra-umc-hil-bridge.service # 本地 CM5 route/mirror API 的 systemd 单元
 ├── tools/
 │   ├── build_test.py    # 不递增版本号的构建检查
-│   └── ci_validate.py   # CI 使用的清单/CHANGELOG/文档校验
+│   ├── ci_validate.py   # CI 使用的清单/CHANGELOG/文档校验
+│   ├── _doc_policy.py   # 家族共享的文档规则 (HYDRA-UMC-SDK 的副本,保持同步)
+│   ├── _readme_parity.py # 检查八个 README 结构一致 (HYDRA-UMC-SDK 的副本,保持同步)
+│   └── hydra_project_tool.py # 每个仓库相同的命令: validate、test、ci、version、status、bump
 ├── Cargo.toml           # 包元数据、依赖项、里程表版本号
 ├── bump_version.py      # 里程表式版本递增（仅由显式 `bump` 命令运行）
 ├── bump_manifest_version.py # 将 hydra-umc.project.json 的版本与原生版本同步(--sync)

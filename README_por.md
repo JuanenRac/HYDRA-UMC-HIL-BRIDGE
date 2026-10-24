@@ -107,14 +107,20 @@ HYDRA-UMC-HIL-BRIDGE/
 │   ├── certificate.rs    # Verifica o certificado de risco Ed25519 do gémeo: ligado ao comando, atualidade, uso único
 │   ├── audit.rs          # Quem enviou cada ordem real: linhas JSON antes de a decidir, últimos registos em memória
 │   ├── server.rs         # Superfície JSON/HTTP simples (tiny_http, bloqueante, sem runtime assíncrono)
-│   └── main.rs           # Ponto de entrada + subcomandos reais `route`/`mirror`
+│   ├── main.rs           # Ponto de entrada + subcomandos reais `route`/`mirror`
+│   ├── access.rs         # Token Bearer opcional para a API HTTP (dispensável em loopback, obrigatório fora dele)
+│   ├── limits.rs         # Os limites das articulações do robô, lidos do seu URDF
+│   └── watchdog.rs       # O watchdog, do lado do consumidor, dos comandos reais (cada comando só vale por pouco tempo)
 ├── docs/                # Documentação e guias de integração
 ├── images/              # Multimédia e diagramas
 ├── systemd/
 │   └── hydra-umc-hil-bridge.service # Unidade systemd local do CM5 para a API route/mirror
 ├── tools/
 │   ├── build_test.py    # Verificação de compilação sem versão
-│   └── ci_validate.py   # Validação de manifesto/CHANGELOG/docs usada pelo CI
+│   ├── ci_validate.py   # Validação de manifesto/CHANGELOG/docs usada pelo CI
+│   ├── _doc_policy.py   # Regras de documentação partilhadas pela família (cópia da de HYDRA-UMC-SDK, mantida em sincronia)
+│   ├── _readme_parity.py # Verificação de que os oito README partilham a mesma estrutura (cópia da de HYDRA-UMC-SDK, mantida em sincronia)
+│   └── hydra_project_tool.py # Os mesmos comandos em todos os repositórios: validate, test, ci, version, status, bump
 ├── Cargo.toml           # Metadados do pacote, dependências, versão em odómetro
 ├── bump_version.py      # Subida de versão ao estilo conta-quilómetros (executada só pelo comando `bump` explícito)
 ├── bump_manifest_version.py # Sincroniza a versão de hydra-umc.project.json com a nativa (--sync)

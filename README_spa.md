@@ -112,14 +112,20 @@ HYDRA-UMC-HIL-BRIDGE/
 │   ├── certificate.rs    # Verifica el certificado de riesgo Ed25519 del gemelo: ligado al comando, vigencia, un solo uso
 │   ├── audit.rs          # Quién envió cada orden real: líneas JSON antes de decidirla, últimos registros en memoria
 │   ├── server.rs         # Superficie JSON/HTTP plana (tiny_http, bloqueante, sin runtime async)
-│   └── main.rs           # Entry point + subcomandos reales `route`/`mirror`
+│   ├── main.rs           # Entry point + subcomandos reales `route`/`mirror`
+│   ├── access.rs         # Token Bearer opcional para la API HTTP (no hace falta en loopback, obligatorio fuera de él)
+│   ├── limits.rs         # Los límites de las articulaciones del robot, leídos de su URDF
+│   └── watchdog.rs       # El vigilante, del lado del consumidor, de las órdenes reales (cada orden solo vale un tiempo corto)
 ├── docs/                # Documentación y guías de integración
 ├── images/              # Medios y diagramas
 ├── systemd/
 │   └── hydra-umc-hil-bridge.service # Unidad systemd de la API local de route/mirror en la CM5
 ├── tools/
 │   ├── build_test.py    # Comprobación de compilación sin versionado
-│   └── ci_validate.py   # Validación de manifiesto/CHANGELOG/docs usada por CI
+│   ├── ci_validate.py   # Validación de manifiesto/CHANGELOG/docs usada por CI
+│   ├── _doc_policy.py   # Reglas de documentación compartidas por la familia (copia de la de HYDRA-UMC-SDK, mantenida en sincronía)
+│   ├── _readme_parity.py # Comprobación de que los ocho README comparten estructura (copia de la de HYDRA-UMC-SDK, mantenida en sincronía)
+│   └── hydra_project_tool.py # Los mismos comandos en todos los repositorios: validate, test, ci, version, status, bump
 ├── Cargo.toml           # Metadatos del paquete, dependencias, version cuentakilometros
 ├── bump_version.py      # Incremento de versión tipo cuentakilómetros (solo lo ejecuta el comando `bump` explícito)
 ├── bump_manifest_version.py # Sincroniza la versión de hydra-umc.project.json con la nativa (--sync)

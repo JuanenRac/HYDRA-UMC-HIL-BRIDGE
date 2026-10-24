@@ -113,14 +113,20 @@ HYDRA-UMC-HIL-BRIDGE/
 │   ├── certificate.rs    # Vérifie le certificat de risque Ed25519 du jumeau : lié à la commande, fraîcheur, usage unique
 │   ├── audit.rs          # Qui a envoyé chaque ordre réel : lignes JSON avant la décision, derniers enregistrements en mémoire
 │   ├── server.rs         # Surface JSON/HTTP simple (tiny_http, bloquant, sans runtime async)
-│   └── main.rs           # Point d'entrée + vrais sous-commandes `route`/`mirror`
+│   ├── main.rs           # Point d'entrée + vrais sous-commandes `route`/`mirror`
+│   ├── access.rs         # Jeton Bearer facultatif pour l'API HTTP (inutile en boucle locale, obligatoire en dehors)
+│   ├── limits.rs         # Les limites des articulations du robot, lues dans son URDF
+│   └── watchdog.rs       # Le chien de garde, côté consommateur, des commandes réelles (chaque commande ne vaut que peu de temps)
 ├── docs/                # Documentation et guides d'intégration
 ├── images/              # Médias et diagrammes
 ├── systemd/
 │   └── hydra-umc-hil-bridge.service # Unité systemd de l'API locale route/mirror sur la CM5
 ├── tools/
 │   ├── build_test.py    # Vérification de build sans versionnage
-│   └── ci_validate.py   # Validation manifeste/CHANGELOG/docs utilisée par CI
+│   ├── ci_validate.py   # Validation manifeste/CHANGELOG/docs utilisée par CI
+│   ├── _doc_policy.py   # Règles de documentation partagées par la famille (copie de celle de HYDRA-UMC-SDK, tenue synchronisée)
+│   ├── _readme_parity.py # Contrôle que les huit README partagent la même structure (copie de celui de HYDRA-UMC-SDK, tenue synchronisée)
+│   └── hydra_project_tool.py # Les mêmes commandes dans chaque dépôt : validate, test, ci, version, status, bump
 ├── Cargo.toml           # Métadonnées du paquet, dépendances, version compteur kilométrique
 ├── bump_version.py      # Incrément de version type compteur kilométrique (exécuté seulement par la commande `bump` explicite)
 ├── bump_manifest_version.py # Synchronise la version de hydra-umc.project.json avec la version native (--sync)
