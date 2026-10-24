@@ -44,16 +44,28 @@ impl fmt::Display for TransportError {
 
 pub trait CommandSink {
     fn send(&mut self, command: &JointCommand) -> Result<(), TransportError>;
+
+    /// Stops a joint: asked by the watchdog when the lease of the last command ran out. A sink that cannot stop reports it, because a
+    /// stop that did not happen must not be taken for one that did.
+    fn stop(&mut self, _joint: &str) -> Result<(), TransportError> {
+        Err(TransportError::Disconnected)
+    }
 }
 
 #[derive(Debug, Default)]
 pub struct RecordingSink {
     pub received: Vec<JointCommand>,
+    pub stopped: Vec<String>,
 }
 
 impl CommandSink for RecordingSink {
     fn send(&mut self, command: &JointCommand) -> Result<(), TransportError> {
         self.received.push(command.clone());
+        Ok(())
+    }
+
+    fn stop(&mut self, joint: &str) -> Result<(), TransportError> {
+        self.stopped.push(joint.to_string());
         Ok(())
     }
 }

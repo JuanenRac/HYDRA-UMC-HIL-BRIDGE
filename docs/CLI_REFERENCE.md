@@ -240,8 +240,12 @@ command, too old, from the future or already used, answers `200` with `{"Blocked
 | `--certificate-max-age-ms N` | | Oldest certificate accepted, 1 to 60000 (default 2000). |
 | `--allow-unsigned-risk` | `HYDRA_UMC_HIL_BRIDGE_ALLOW_UNSIGNED_RISK=1` | Bench setting: believe the `risk` the caller wrote, in real mode. Off by default; announced at every start. |
 | `--audit-log FILE` | `HYDRA_UMC_HIL_BRIDGE_AUDIT_LOG` | Append every real order (`order` before it is decided, `outcome` after) as a JSON line; an order whose record cannot be written is refused with `503`. |
+| `--max-valid-for-ms N` | | Longest validity window accepted for a real command, 1 to 60000 (default 1000). |
+| `--allow-undated-commands` | `HYDRA_UMC_HIL_BRIDGE_ALLOW_UNDATED_COMMANDS=1` | Accept a real command without `issued_at_ms` and `valid_for_ms`. Off by default; announced at every start: such a command stays in force if its producer stops. |
 
 `GET /audit` (behind the Bearer token when there is one) answers `{"records": [...last 200...], "file": bool}`. A record has `at_ms`, `phase`, `caller`
 (the `X-Hydra-Caller` header, or `unidentified`), `peer`, `authenticated`, `mode`, `joint`, `position`, `certificate_key_id`, `certificate_nonce` and, for an outcome, `kind`,
 `delivered` and `reason`. `GET /stats` adds `uncertified`, `auditFailures`, `certifiedMode` and `unsignedRiskAllowed`.
+
+**Validity window and watchdog.** A `POST /route` in real mode carries `issued_at_ms` (milliseconds since the epoch), `valid_for_ms` (1 up to `--max-valid-for-ms`) and, optionally, a `seq` that must grow for each joint. A command that is already expired, issued more than 2 s in the future, good for too long or not newer than the last accepted for its joint is blocked (`BlockedByInterlock`) before its certificate is used. A delivered command holds a lease on its joint until `issued_at_ms + valid_for_ms`; when it ends without a newer valid command the bridge stops the joint itself (`phase` `watchdog`, `kind` `watchdog_stop` in the audit) whether the producer is alive or not. `GET /stats` adds `staleCommands`, `watchdogStops`, `watchdogStopFailures`, `watchdogRequiresValidity`, `watchdogMaxValidForMs` and `activeLeases`. The stop reaches the same recording sink as the commands, because no transport is wired in yet.
 

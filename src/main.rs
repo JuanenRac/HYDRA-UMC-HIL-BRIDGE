@@ -22,6 +22,7 @@ mod certificate;
 mod interlock;
 mod protocol;
 mod server;
+mod watchdog;
 
 use std::env;
 use std::process::ExitCode;
@@ -223,6 +224,32 @@ fn load_interlock(args: &[String]) -> Result<server::InterlockConfig, String> {
     Ok(config)
 }
 
+/// The lease of the real commands. A real command needs its validity window unless `--allow-undated-commands` (or the variable) says
+/// otherwise; the longest window accepted is `--max-valid-for-ms` (default 1000).
+fn load_watchdog(args: &[String]) -> Result<watchdog::WatchdogConfig, String> {
+    let mut config = watchdog::WatchdogConfig {
+        require_validity: true,
+        ..watchdog::WatchdogConfig::default()
+    };
+    if has_flag(args, "--allow-undated-commands")
+        || env::var("HYDRA_UMC_HIL_BRIDGE_ALLOW_UNDATED_COMMANDS")
+            .map(|v| v == "1")
+            .unwrap_or(false)
+    {
+        config.require_validity = false;
+    }
+    if let Some(text) = find_flag(args, "--max-valid-for-ms") {
+        let ms: u64 = text
+            .parse()
+            .map_err(|_| "--max-valid-for-ms must be a whole number of milliseconds".to_string())?;
+        if ms == 0 || ms > 60_000 {
+            return Err("--max-valid-for-ms must be between 1 and 60000".to_string());
+        }
+        config.max_valid_for_ms = ms;
+    }
+    Ok(config)
+}
+
 fn run_serve(args: &[String]) -> ExitCode {
     let addr = find_flag(args, "--addr").unwrap_or_else(|| "127.0.0.1".to_string());
     let port = find_flag(args, "--port").unwrap_or_else(|| "8113".to_string());
@@ -245,6 +272,13 @@ fn run_serve(args: &[String]) -> ExitCode {
 
     let interlock = match load_interlock(args) {
         Ok(interlock) => interlock,
+        Err(message) => {
+            eprintln!("[hil-bridge] fatal: {message}");
+            return ExitCode::from(2);
+        }
+    };
+    let watchdog = match load_watchdog(args) {
+        Ok(watchdog) => watchdog,
         Err(message) => {
             eprintln!("[hil-bridge] fatal: {message}");
             return ExitCode::from(2);
@@ -278,6 +312,11 @@ fn run_serve(args: &[String]) -> ExitCode {
             if interlock.allow_unsigned_risk {
                 eprintln!("[hil-bridge] WARNING: --allow-unsigned-risk is ON: a risk report written by the caller is believed in real mode (bench use only)");
             }
+            if watchdog.require_validity {
+                eprintln!("[hil-bridge] a real command needs its validity window (issued_at_ms, valid_for_ms); a joint whose last command ran out is stopped by the watchdog (windows up to {} ms)", watchdog.max_valid_for_ms);
+            } else {
+                eprintln!("[hil-bridge] WARNING: --allow-undated-commands is ON: a real command without a validity window stays in force if its producer stops");
+            }
             match &audit_log {
                 Some(path) => eprintln!("[hil-bridge] every real order is recorded in {} before it is decided; if the record cannot be written the order is refused", path.display()),
                 None => eprintln!("[hil-bridge] no --audit-log: the last real orders are kept in memory only (GET /audit)"),
@@ -289,6 +328,7 @@ fn run_serve(args: &[String]) -> ExitCode {
                     token,
                     interlock,
                     audit_log,
+                    watchdog,
                 },
             );
             ExitCode::SUCCESS

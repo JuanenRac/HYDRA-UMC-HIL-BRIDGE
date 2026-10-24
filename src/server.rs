@@ -13,6 +13,8 @@
 //! CLI already uses; this closes the "only reachable as a one-shot CLI"
 //! gap, not the still-deferred real gRPC/WebSocket transport question.
 
+use std::time::Duration;
+
 use serde::Deserialize;
 use serde_json::json;
 use tiny_http::{Header, Method, Response, Server};
@@ -23,6 +25,7 @@ use crate::bridge::{Bridge, CommandSink, RecordingSink, RouteOutcome, SimulatedT
 use crate::certificate::{verify, Certificate, CertificatePolicy, NonceCache, TrustedKeys};
 use crate::interlock::TwinRiskReport;
 use crate::protocol::{JointCommand, Mode};
+use crate::watchdog::{Leases, Validity, WatchdogConfig};
 
 fn json_header() -> Header {
     Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap()
@@ -112,6 +115,25 @@ struct RouteRequest {
     certificate: Option<Certificate>,
     #[serde(default)]
     transport: TransportConfig,
+    /// The validity window of the command (see `watchdog.rs`): when it was issued, how long it is good for, and its sequence number.
+    issued_at_ms: Option<u64>,
+    valid_for_ms: Option<u64>,
+    seq: Option<u64>,
+}
+
+impl RouteRequest {
+    /// The validity window, when the request carries one. Half a window is not a window.
+    fn validity(&self) -> Result<Option<Validity>, String> {
+        match (self.issued_at_ms, self.valid_for_ms) {
+            (Some(issued_at_ms), Some(valid_for_ms)) => Ok(Some(Validity {
+                issued_at_ms,
+                valid_for_ms,
+                seq: self.seq,
+            })),
+            (None, None) if self.seq.is_none() => Ok(None),
+            _ => Err("issued_at_ms and valid_for_ms go together (seq needs both)".to_string()),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -142,6 +164,9 @@ struct Stats {
     unauthorized: u64,
     uncertified: u64,
     audit_failures: u64,
+    stale_commands: u64,
+    watchdog_stops: u64,
+    watchdog_stop_failures: u64,
 }
 
 /// How the interlock of the real mode is certified. The default trusts no twin and accepts no unsigned report: a real command is blocked
@@ -162,6 +187,8 @@ pub struct ServerConfig {
     pub interlock: InterlockConfig,
     /// Where the audit records of the real orders are appended (None: only the last ones are kept, in memory).
     pub audit_log: Option<std::path::PathBuf>,
+    /// The lease of the real commands (see `watchdog.rs`).
+    pub watchdog: WatchdogConfig,
 }
 
 /// What the bridge itself knows about who sent a request.
@@ -232,7 +259,16 @@ pub fn run_with_config(server: Server, config: ServerConfig) {
     let mut nonces = NonceCache::default();
     let mut audit = Audit::new(config.audit_log.clone());
     let mut stats = Stats::default();
-    for mut request in server.incoming_requests() {
+    let mut leases = Leases::new(config.watchdog);
+    let mut hold_sink = RecordingSink::default();
+    loop {
+        // The watchdog runs between requests: a joint whose lease ran out is stopped even when nothing arrives any more.
+        stop_lapsed_leases(&mut leases, &mut hold_sink, &mut audit, &mut stats);
+        let mut request = match server.recv_timeout(Duration::from_millis(WATCHDOG_TICK_MS)) {
+            Ok(Some(request)) => request,
+            Ok(None) => continue,
+            Err(_) => break,
+        };
         let path = request.url().split('?').next().unwrap_or("").to_string();
         let mut authenticated = false;
 
@@ -279,6 +315,12 @@ pub fn run_with_config(server: Server, config: ServerConfig) {
                     "unauthorized": stats.unauthorized,
                     "uncertified": stats.uncertified,
                     "auditFailures": stats.audit_failures,
+                    "staleCommands": stats.stale_commands,
+                    "watchdogStops": stats.watchdog_stops,
+                    "watchdogStopFailures": stats.watchdog_stop_failures,
+                    "watchdogRequiresValidity": config.watchdog.require_validity,
+                    "watchdogMaxValidForMs": config.watchdog.max_valid_for_ms,
+                    "activeLeases": leases.active(now_ms()),
                     "certifiedMode": !config.interlock.trusted_keys.is_empty(),
                     "unsignedRiskAllowed": config.interlock.allow_unsigned_risk,
                 }),
@@ -358,6 +400,7 @@ pub fn run_with_config(server: Server, config: ServerConfig) {
                 },
                 &mut nonces,
                 &mut audit,
+                &mut leases,
                 &info,
             ),
             "/mirror" => handle_mirror(request, &raw, &mut stats),
@@ -370,6 +413,54 @@ pub fn run_with_config(server: Server, config: ServerConfig) {
 }
 
 /// The settings `handle_route` reads.
+/// How often the watchdog looks at the leases while no request arrives.
+const WATCHDOG_TICK_MS: u64 = 50;
+
+/// Stops every joint whose lease ran out and records each stop. A stop that could not be done is counted and recorded as not delivered.
+fn stop_lapsed_leases(
+    leases: &mut Leases,
+    sink: &mut dyn CommandSink,
+    audit: &mut Audit,
+    stats: &mut Stats,
+) {
+    for stop in leases.due_stops(now_ms()) {
+        let result = sink.stop(&stop.joint);
+        let delivered = result.is_ok();
+        if delivered {
+            stats.watchdog_stops += 1;
+        } else {
+            stats.watchdog_stop_failures += 1;
+        }
+        eprintln!(
+            "[hil-bridge] watchdog: no valid command for joint {:?} since {} ms, stop delivered={}",
+            stop.joint, stop.expired_at_ms, delivered
+        );
+        let entry = AuditEntry {
+            at_ms: now_ms(),
+            phase: "watchdog",
+            caller: "watchdog".to_string(),
+            peer: "local".to_string(),
+            authenticated: false,
+            mode: "real",
+            joint: stop.joint,
+            position: stop.last_position,
+            certificate_key_id: None,
+            certificate_nonce: None,
+            kind: Some("watchdog_stop"),
+            delivered: Some(delivered),
+            reason: Some(match result {
+                Ok(()) => "no newer valid command arrived before the lease of the last one ran out"
+                    .to_string(),
+                Err(e) => format!("the stop could not be delivered: {e}"),
+            }),
+        };
+        if let Err(e) = audit.record(entry) {
+            stats.audit_failures += 1;
+            eprintln!("[hil-bridge] audit failure for a watchdog stop: {e}");
+        }
+    }
+}
+
 struct RouteContext<'a> {
     fault_injection: bool,
     interlock: &'a InterlockConfig,
@@ -411,6 +502,7 @@ fn handle_route(
     context: &RouteContext,
     nonces: &mut NonceCache,
     audit: &mut Audit,
+    leases: &mut Leases,
     info: &RequestInfo,
 ) {
     let fault_injection = context.fault_injection;
@@ -427,6 +519,14 @@ fn handle_route(
         }
     };
 
+    let validity = match req.validity() {
+        Ok(validity) => validity,
+        Err(reason) => {
+            stats.malformed_requests += 1;
+            write_json(request, 400, &json!({"error": reason}));
+            return;
+        }
+    };
     let command = JointCommand {
         joint: req.joint,
         position: req.position,
@@ -493,7 +593,13 @@ fn handle_route(
         Mode::Real => {
             // Real mode: the report that gates the command must be the twin's. A certificate is checked (signature, command, age, replay);
             // an unsigned report is believed only on the bench setting; anything else is blocked with the reason.
-            let report = if let Some(certificate) = &req.certificate {
+            // The validity window comes first, so a stale command does not use up the certificate it carries.
+            let report = if let Err(reason) =
+                leases.check(&command.joint, validity.as_ref(), now_ms())
+            {
+                stats.stale_commands += 1;
+                Err(reason)
+            } else if let Some(certificate) = &req.certificate {
                 verify(
                     certificate,
                     &command,
@@ -520,6 +626,11 @@ fn handle_route(
             }
         }
     };
+    if req.mode == Mode::Real && outcome == RouteOutcome::SentReal {
+        if let Some(validity) = &validity {
+            leases.grant(&command.joint, command.position, validity);
+        }
+    }
     if req.mode == Mode::Real {
         let mut done = audit_entry(
             info,
@@ -1383,5 +1494,150 @@ mod tests {
         );
         let (_, bare) = get_with(start_with(ServerConfig::default()), "/stats", "");
         assert!(bare.contains("\"certifiedMode\":false"), "{bare}");
+    }
+
+    // ---- the consumer-side watchdog (see watchdog.rs) ----
+
+    fn watched_config(require_validity: bool) -> ServerConfig {
+        ServerConfig {
+            watchdog: WatchdogConfig {
+                require_validity,
+                ..WatchdogConfig::default()
+            },
+            ..certified_config()
+        }
+    }
+
+    fn windowed_body(certificate: &str, issued_at_ms: u64, valid_for_ms: u64, seq: u64) -> String {
+        format!(
+            r#"{{"mode":"real","joint":"shoulder","position":1.0,"certificate":{certificate},"issued_at_ms":{issued_at_ms},"valid_for_ms":{valid_for_ms},"seq":{seq}}}"#
+        )
+    }
+
+    fn stat(port: u16, name: &str) -> u64 {
+        let (_, body) = get_with(port, "/stats", "");
+        serde_json::from_str::<serde_json::Value>(&body).unwrap()[name]
+            .as_u64()
+            .unwrap_or(u64::MAX)
+    }
+
+    #[test]
+    fn a_real_command_without_a_window_is_blocked_when_the_window_is_required() {
+        let port = start_with(watched_config(true));
+        let (status, resp) = post_with(
+            port,
+            "/route",
+            "",
+            &route_body("real", Some(&fresh_certificate(NONCE_A))),
+        );
+        assert_eq!(status, 200);
+        assert!(resp.contains("BlockedByInterlock"), "{resp}");
+        assert!(resp.contains("validity window"), "{resp}");
+        assert_eq!(stat(port, "staleCommands"), 1);
+        assert_eq!(stat(port, "routedReal"), 0);
+    }
+
+    #[test]
+    fn a_command_with_a_fresh_window_is_forwarded_and_holds_a_lease() {
+        let port = start_with(watched_config(true));
+        let (_, resp) = post_with(
+            port,
+            "/route",
+            "",
+            &windowed_body(&fresh_certificate(NONCE_A), now_ms(), 800, 1),
+        );
+        assert!(resp.contains("SentReal"), "{resp}");
+        assert_eq!(stat(port, "activeLeases"), 1);
+    }
+
+    #[test]
+    fn an_expired_window_is_blocked_and_does_not_use_up_the_certificate() {
+        let port = start_with(watched_config(true));
+        let certificate = fresh_certificate(NONCE_A);
+        let (_, stale) = post_with(
+            port,
+            "/route",
+            "",
+            &windowed_body(&certificate, now_ms().saturating_sub(5000), 200, 1),
+        );
+        assert!(stale.contains("BlockedByInterlock"), "{stale}");
+        assert!(stale.contains("expired"), "{stale}");
+        // the same certificate is still good for a fresh command
+        let (_, fresh) = post_with(
+            port,
+            "/route",
+            "",
+            &windowed_body(&certificate, now_ms(), 800, 1),
+        );
+        assert!(fresh.contains("SentReal"), "{fresh}");
+    }
+
+    #[test]
+    fn a_repeated_sequence_number_is_blocked() {
+        let port = start_with(watched_config(true));
+        let (_, first) = post_with(
+            port,
+            "/route",
+            "",
+            &windowed_body(&fresh_certificate(NONCE_A), now_ms(), 800, 5),
+        );
+        assert!(first.contains("SentReal"), "{first}");
+        let (_, again) = post_with(
+            port,
+            "/route",
+            "",
+            &windowed_body(&fresh_certificate(NONCE_B), now_ms(), 800, 5),
+        );
+        assert!(again.contains("BlockedByInterlock"), "{again}");
+        assert!(again.contains("not newer"), "{again}");
+    }
+
+    #[test]
+    fn half_a_window_is_a_400() {
+        let port = start_with(watched_config(true));
+        let body = r#"{"mode":"real","joint":"shoulder","position":1.0,"issued_at_ms":1}"#;
+        let (status, _) = post_with(port, "/route", "", body);
+        assert_eq!(status, 400);
+    }
+
+    #[test]
+    fn a_joint_whose_lease_runs_out_is_stopped_by_the_bridge_itself() {
+        let port = start_with(watched_config(true));
+        let (_, resp) = post_with(
+            port,
+            "/route",
+            "",
+            &windowed_body(&fresh_certificate(NONCE_A), now_ms(), 150, 1),
+        );
+        assert!(resp.contains("SentReal"), "{resp}");
+        assert_eq!(stat(port, "watchdogStops"), 0);
+        // nothing else arrives: the producer is gone
+        let mut stops = 0;
+        for _ in 0..40 {
+            thread::sleep(std::time::Duration::from_millis(50));
+            stops = stat(port, "watchdogStops");
+            if stops > 0 {
+                break;
+            }
+        }
+        assert_eq!(stops, 1, "the watchdog must stop the joint once");
+        assert_eq!(stat(port, "activeLeases"), 0);
+        let (_, audit) = get_with(port, "/audit", "");
+        assert!(audit.contains("watchdog_stop"), "{audit}");
+        thread::sleep(std::time::Duration::from_millis(200));
+        assert_eq!(stat(port, "watchdogStops"), 1, "a stop is not repeated");
+    }
+
+    #[test]
+    fn a_command_without_a_window_pass_when_the_bridge_is_started_for_undated_commands() {
+        let port = start_with(watched_config(false));
+        let (_, resp) = post_with(
+            port,
+            "/route",
+            "",
+            &route_body("real", Some(&fresh_certificate(NONCE_A))),
+        );
+        assert!(resp.contains("SentReal"), "{resp}");
+        assert_eq!(stat(port, "activeLeases"), 0);
     }
 }
