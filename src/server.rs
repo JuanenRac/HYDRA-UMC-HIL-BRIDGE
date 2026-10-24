@@ -13,6 +13,7 @@
 //! CLI already uses; this closes the "only reachable as a one-shot CLI"
 //! gap, not the still-deferred real gRPC/WebSocket transport question.
 
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -24,6 +25,7 @@ use crate::audit::{caller_label, Audit, AuditEntry};
 use crate::bridge::{Bridge, CommandSink, RecordingSink, RouteOutcome, SimulatedTransport};
 use crate::certificate::{verify, Certificate, CertificatePolicy, NonceCache, TrustedKeys};
 use crate::interlock::TwinRiskReport;
+use crate::limits::JointLimits;
 use crate::protocol::{JointCommand, Mode};
 use crate::watchdog::{Leases, Validity, WatchdogConfig};
 
@@ -34,14 +36,6 @@ fn json_header() -> Header {
 fn header(name: &str, value: &str) -> tiny_http::Header {
     tiny_http::Header::from_bytes(name.as_bytes(), value.as_bytes())
         .expect("static header names and values are valid")
-}
-
-fn write_json(request: tiny_http::Request, status: u16, body: &serde_json::Value) {
-    let text = body.to_string();
-    let response = Response::from_string(text)
-        .with_status_code(status)
-        .with_header(json_header());
-    let _ = request.respond(response);
 }
 
 /// The largest request body this surface reads. Every request here is a few hundred bytes of JSON; reading without a limit let anything that could reach the port make the process
@@ -142,15 +136,8 @@ struct MirrorRequest {
     position: f64,
 }
 
-/// Real process-lifetime counters, found missing while auditing the code:
-/// `GET /stats` used to return a hardcoded
-/// static JSON body with nothing real to aggregate - each request built a
-/// fresh `Bridge`/`RecordingSink` and threw them away. `run()`'s own
-/// request loop is single-threaded (one request handled at a time, no
-/// per-request thread spawned), so plain `u64` fields are enough, with no
-/// `Mutex` or atomics needed; every increment and the `/stats` read that
-/// reports them happen from the same loop iteration in sequence, never
-/// concurrently.
+/// Real process-lifetime counters. They live in the `State` the workers share behind one lock, so every increment and the `/stats` read
+/// that reports them happen in sequence.
 #[derive(Default)]
 struct Stats {
     routed_real: u64,
@@ -165,6 +152,7 @@ struct Stats {
     uncertified: u64,
     audit_failures: u64,
     stale_commands: u64,
+    outside_limits: u64,
     watchdog_stops: u64,
     watchdog_stop_failures: u64,
 }
@@ -189,6 +177,10 @@ pub struct ServerConfig {
     pub audit_log: Option<std::path::PathBuf>,
     /// The lease of the real commands (see `watchdog.rs`).
     pub watchdog: WatchdogConfig,
+    /// The joints of the robot and their ranges (`--urdf`): a real command outside them is blocked. None: only the shape of the command is checked.
+    pub limits: Option<JointLimits>,
+    /// How many requests are served at once (0: `DEFAULT_WORKERS`).
+    pub workers: usize,
 }
 
 /// What the bridge itself knows about who sent a request.
@@ -253,166 +245,248 @@ pub fn run_with_token(server: Server, fault_injection: bool, token: Option<Strin
     );
 }
 
+/// How many requests are served at once (default 8). A request that is slow (a client that sends its body one byte a minute) holds one worker, not the whole bridge.
+pub const DEFAULT_WORKERS: usize = 8;
+
+/// What the decisions share. The real orders are decided one at a time, in the order they get the lock, so the lease of a joint, the
+/// nonces of the certificates and the audit log never see two orders at once; reading a request and answering it happen outside the lock.
+struct State {
+    nonces: NonceCache,
+    audit: Audit,
+    stats: Stats,
+    leases: Leases,
+    hold_sink: RecordingSink,
+}
+
+struct Shared {
+    config: ServerConfig,
+    state: Mutex<State>,
+}
+
+impl Shared {
+    /// A worker that panicked while holding the lock must not stop the watchdog or the other workers: the state is taken as it was left.
+    fn lock(&self) -> MutexGuard<'_, State> {
+        self.state.lock().unwrap_or_else(|p| p.into_inner())
+    }
+}
+
+/// The answer to a request, built under the lock and sent after it is released.
+struct Reply {
+    status: u16,
+    body: serde_json::Value,
+    headers: Vec<(&'static str, String)>,
+}
+
+impl Reply {
+    fn json(status: u16, body: serde_json::Value) -> Self {
+        Self {
+            status,
+            body,
+            headers: Vec::new(),
+        }
+    }
+    fn with(mut self, name: &'static str, value: impl Into<String>) -> Self {
+        self.headers.push((name, value.into()));
+        self
+    }
+    fn send(self, request: tiny_http::Request) {
+        let mut response = Response::from_string(self.body.to_string())
+            .with_status_code(self.status)
+            .with_header(json_header());
+        for (name, value) in self.headers {
+            response = response.with_header(header(name, &value));
+        }
+        let _ = request.respond(response);
+    }
+}
+
 /// Serve with the whole configuration: the token, the way the real mode is certified and the audit log.
 pub fn run_with_config(server: Server, config: ServerConfig) {
-    let token = config.token.clone();
-    let mut nonces = NonceCache::default();
-    let mut audit = Audit::new(config.audit_log.clone());
-    let mut stats = Stats::default();
-    let mut leases = Leases::new(config.watchdog);
-    let mut hold_sink = RecordingSink::default();
+    let workers = if config.workers == 0 {
+        DEFAULT_WORKERS
+    } else {
+        config.workers
+    };
+    let state = State {
+        nonces: NonceCache::default(),
+        audit: Audit::new(config.audit_log.clone()),
+        stats: Stats::default(),
+        leases: Leases::new(config.watchdog),
+        hold_sink: RecordingSink::default(),
+    };
+    let shared = Arc::new(Shared {
+        config,
+        state: Mutex::new(state),
+    });
+    let server = Arc::new(server);
+    let mut handles = Vec::new();
+    for _ in 1..workers {
+        let (server, shared) = (server.clone(), shared.clone());
+        handles.push(std::thread::spawn(move || worker_loop(&server, &shared)));
+    }
+    worker_loop(&server, &shared);
+    for handle in handles {
+        let _ = handle.join();
+    }
+}
+
+fn worker_loop(server: &Server, shared: &Shared) {
     loop {
-        // The watchdog runs between requests: a joint whose lease ran out is stopped even when nothing arrives any more.
-        stop_lapsed_leases(&mut leases, &mut hold_sink, &mut audit, &mut stats);
-        let mut request = match server.recv_timeout(Duration::from_millis(WATCHDOG_TICK_MS)) {
+        // The watchdog runs between requests, in every worker: a joint whose lease ran out is stopped even when nothing arrives any more.
+        {
+            let mut state = shared.lock();
+            let State {
+                leases,
+                hold_sink,
+                audit,
+                stats,
+                ..
+            } = &mut *state;
+            stop_lapsed_leases(leases, hold_sink, audit, stats);
+        }
+        let request = match server.recv_timeout(Duration::from_millis(WATCHDOG_TICK_MS)) {
             Ok(Some(request)) => request,
             Ok(None) => continue,
             Err(_) => break,
         };
-        let path = request.url().split('?').next().unwrap_or("").to_string();
-        let mut authenticated = false;
-
-        if let Some(expected) = &token {
-            let health_probe = path == "/stats" && request.method() == &Method::Get;
-            let presented = request
-                .headers()
-                .iter()
-                .find(|h| {
-                    h.field
-                        .as_str()
-                        .as_str()
-                        .eq_ignore_ascii_case("authorization")
-                })
-                .map(|h| h.value.as_str().to_string());
-            authenticated = bearer_matches(presented.as_deref(), expected);
-            if !health_probe && !authenticated {
-                stats.unauthorized += 1;
-                let response = Response::from_string(
-                    json!({"error": "a valid bearer token is required"}).to_string(),
-                )
-                .with_status_code(401)
-                .with_header(json_header())
-                .with_header(header("WWW-Authenticate", "Bearer"));
-                let _ = request.respond(response);
-                continue;
-            }
-        }
-
-        if path == "/stats" && request.method() == &Method::Get {
-            write_json(
-                request,
-                200,
-                &json!({
-                    "role": "Hardware-in-the-loop real-vs-virtual command bridge",
-                    "routedReal": stats.routed_real,
-                    "routedSimulation": stats.routed_simulation,
-                    "blockedByInterlock": stats.blocked_by_interlock,
-                    "transportFailures": stats.transport_failures,
-                    "mirrored": stats.mirrored,
-                    "mirrorFailures": stats.mirror_failures,
-                    "malformedRequests": stats.malformed_requests,
-                    "notFound": stats.not_found,
-                    "unauthorized": stats.unauthorized,
-                    "uncertified": stats.uncertified,
-                    "auditFailures": stats.audit_failures,
-                    "staleCommands": stats.stale_commands,
-                    "watchdogStops": stats.watchdog_stops,
-                    "watchdogStopFailures": stats.watchdog_stop_failures,
-                    "watchdogRequiresValidity": config.watchdog.require_validity,
-                    "watchdogMaxValidForMs": config.watchdog.max_valid_for_ms,
-                    "activeLeases": leases.active(now_ms()),
-                    "certifiedMode": !config.interlock.trusted_keys.is_empty(),
-                    "unsignedRiskAllowed": config.interlock.allow_unsigned_risk,
-                }),
-            );
-            continue;
-        }
-        if path == "/audit" && request.method() == &Method::Get {
-            // who sent the last orders for the real robot; behind the token like every route but /stats
-            write_json(
-                request,
-                200,
-                &json!({"records": audit.recent(), "file": audit.has_file()}),
-            );
-            continue;
-        }
-        if request.method() != &Method::Post {
-            stats.not_found += 1;
-            if matches!(path.as_str(), "/route" | "/mirror" | "/stats" | "/audit") {
-                let response =
-                    Response::from_string(json!({"error": "method not allowed"}).to_string())
-                        .with_status_code(405)
-                        .with_header(json_header())
-                        .with_header(header(
-                            "Allow",
-                            if path == "/stats" || path == "/audit" {
-                                "GET"
-                            } else {
-                                "POST"
-                            },
-                        ));
-                let _ = request.respond(response);
-            } else {
-                write_json(request, 404, &json!({"error": "not found"}));
-            }
-            continue;
-        }
-
-        if let Err((status, message)) = check_request_origin(&request) {
-            stats.malformed_requests += 1;
-            write_json(request, status, &json!({"error": message}));
-            continue;
-        }
-
-        let raw = match read_body(&mut request) {
-            Ok(raw) => raw,
-            Err(e) => {
-                stats.malformed_requests += 1;
-                let (status, message) = match e {
-                    BodyError::TooLarge => (
-                        413,
-                        format!("request body is larger than {MAX_BODY_BYTES} bytes"),
-                    ),
-                    BodyError::NotUtf8 => (400, "request body is not valid UTF-8".to_string()),
-                    BodyError::Io(e) => (400, format!("could not read request body: {e}")),
-                };
-                write_json(request, status, &json!({"error": message}));
-                continue;
-            }
-        };
-
-        let info = RequestInfo {
-            caller: caller_label(header_value(&request, "x-hydra-caller").as_deref()),
-            peer: request
-                .remote_addr()
-                .map(|a| a.to_string())
-                .unwrap_or_else(|| "unknown".to_string()),
-            authenticated,
-        };
-        match path.as_str() {
-            "/route" => handle_route(
-                request,
-                &raw,
-                &mut stats,
-                &RouteContext {
-                    fault_injection: config.fault_injection,
-                    interlock: &config.interlock,
-                },
-                &mut nonces,
-                &mut audit,
-                &mut leases,
-                &info,
-            ),
-            "/mirror" => handle_mirror(request, &raw, &mut stats),
-            _ => {
-                stats.not_found += 1;
-                write_json(request, 404, &json!({"error": "not found"}));
-            }
-        }
+        handle_request(request, shared);
     }
 }
 
-/// The settings `handle_route` reads.
+fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
+    let config = &shared.config;
+    let path = request.url().split('?').next().unwrap_or("").to_string();
+    let mut authenticated = false;
+
+    if let Some(expected) = &config.token {
+        let health_probe = path == "/stats" && request.method() == &Method::Get;
+        let presented = header_value(&request, "authorization");
+        authenticated = bearer_matches(presented.as_deref(), expected);
+        if !health_probe && !authenticated {
+            shared.lock().stats.unauthorized += 1;
+            Reply::json(401, json!({"error": "a valid bearer token is required"}))
+                .with("WWW-Authenticate", "Bearer")
+                .send(request);
+            return;
+        }
+    }
+
+    if path == "/stats" && request.method() == &Method::Get {
+        let body = {
+            let state = shared.lock();
+            let stats = &state.stats;
+            json!({
+                "role": "Hardware-in-the-loop real-vs-virtual command bridge",
+                "routedReal": stats.routed_real,
+                "routedSimulation": stats.routed_simulation,
+                "blockedByInterlock": stats.blocked_by_interlock,
+                "transportFailures": stats.transport_failures,
+                "mirrored": stats.mirrored,
+                "mirrorFailures": stats.mirror_failures,
+                "malformedRequests": stats.malformed_requests,
+                "notFound": stats.not_found,
+                "unauthorized": stats.unauthorized,
+                "uncertified": stats.uncertified,
+                "auditFailures": stats.audit_failures,
+                "staleCommands": stats.stale_commands,
+                "outsideLimits": stats.outside_limits,
+                "watchdogStops": stats.watchdog_stops,
+                "watchdogStopFailures": stats.watchdog_stop_failures,
+                "watchdogRequiresValidity": config.watchdog.require_validity,
+                "watchdogMaxValidForMs": config.watchdog.max_valid_for_ms,
+                "activeLeases": state.leases.active(now_ms()),
+                "certifiedMode": !config.interlock.trusted_keys.is_empty(),
+                "unsignedRiskAllowed": config.interlock.allow_unsigned_risk,
+                "urdfLimits": config.limits.as_ref().map(|l| l.len()),
+                "workers": if config.workers == 0 { DEFAULT_WORKERS } else { config.workers },
+            })
+        };
+        Reply::json(200, body).send(request);
+        return;
+    }
+    if path == "/audit" && request.method() == &Method::Get {
+        // who sent the last orders for the real robot; behind the token like every route but /stats
+        let body = {
+            let state = shared.lock();
+            json!({"records": state.audit.recent(), "file": state.audit.has_file()})
+        };
+        Reply::json(200, body).send(request);
+        return;
+    }
+    if request.method() != &Method::Post {
+        shared.lock().stats.not_found += 1;
+        if matches!(path.as_str(), "/route" | "/mirror" | "/stats" | "/audit") {
+            Reply::json(405, json!({"error": "method not allowed"}))
+                .with(
+                    "Allow",
+                    if path == "/stats" || path == "/audit" {
+                        "GET"
+                    } else {
+                        "POST"
+                    },
+                )
+                .send(request);
+        } else {
+            Reply::json(404, json!({"error": "not found"})).send(request);
+        }
+        return;
+    }
+
+    if let Err((status, message)) = check_request_origin(&request) {
+        shared.lock().stats.malformed_requests += 1;
+        Reply::json(status, json!({"error": message})).send(request);
+        return;
+    }
+
+    // Reading the body can take as long as the client wants: it is done before the lock is taken.
+    let raw = match read_body(&mut request) {
+        Ok(raw) => raw,
+        Err(e) => {
+            shared.lock().stats.malformed_requests += 1;
+            let (status, message) = match e {
+                BodyError::TooLarge => (
+                    413,
+                    format!("request body is larger than {MAX_BODY_BYTES} bytes"),
+                ),
+                BodyError::NotUtf8 => (400, "request body is not valid UTF-8".to_string()),
+                BodyError::Io(e) => (400, format!("could not read request body: {e}")),
+            };
+            Reply::json(status, json!({"error": message})).send(request);
+            return;
+        }
+    };
+
+    let info = RequestInfo {
+        caller: caller_label(header_value(&request, "x-hydra-caller").as_deref()),
+        peer: request
+            .remote_addr()
+            .map(|a| a.to_string())
+            .unwrap_or_else(|| "unknown".to_string()),
+        authenticated,
+    };
+    let reply = match path.as_str() {
+        "/route" => {
+            let mut state = shared.lock();
+            handle_route(
+                &raw,
+                &mut state,
+                &RouteContext {
+                    fault_injection: config.fault_injection,
+                    interlock: &config.interlock,
+                    limits: config.limits.as_ref(),
+                },
+                &info,
+            )
+        }
+        "/mirror" => handle_mirror(&raw, &mut shared.lock().stats),
+        _ => {
+            shared.lock().stats.not_found += 1;
+            Reply::json(404, json!({"error": "not found"}))
+        }
+    };
+    reply.send(request);
+}
+
 /// How often the watchdog looks at the leases while no request arrives.
 const WATCHDOG_TICK_MS: u64 = 50;
 
@@ -461,9 +535,12 @@ fn stop_lapsed_leases(
     }
 }
 
+/// The settings `handle_route` reads.
 struct RouteContext<'a> {
     fault_injection: bool,
     interlock: &'a InterlockConfig,
+    /// The joints and ranges of the robot (`--urdf`), when known.
+    limits: Option<&'a JointLimits>,
 }
 
 fn audit_entry(
@@ -494,28 +571,23 @@ fn audit_entry(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn handle_route(
-    request: tiny_http::Request,
-    raw: &str,
-    stats: &mut Stats,
-    context: &RouteContext,
-    nonces: &mut NonceCache,
-    audit: &mut Audit,
-    leases: &mut Leases,
-    info: &RequestInfo,
-) {
+fn handle_route(raw: &str, state: &mut State, context: &RouteContext, info: &RequestInfo) -> Reply {
+    let State {
+        nonces,
+        audit,
+        stats,
+        leases,
+        ..
+    } = state;
     let fault_injection = context.fault_injection;
     let req: RouteRequest = match serde_json::from_str(raw) {
         Ok(r) => r,
         Err(e) => {
             stats.malformed_requests += 1;
-            write_json(
-                request,
+            return Reply::json(
                 400,
-                &json!({"error": format!("malformed request JSON: {e}")}),
+                json!({"error": format!("malformed request JSON: {e}")}),
             );
-            return;
         }
     };
 
@@ -523,8 +595,7 @@ fn handle_route(
         Ok(validity) => validity,
         Err(reason) => {
             stats.malformed_requests += 1;
-            write_json(request, 400, &json!({"error": reason}));
-            return;
+            return Reply::json(400, json!({"error": reason}));
         }
     };
     let command = JointCommand {
@@ -533,20 +604,17 @@ fn handle_route(
     };
     if let Err(reason) = command.validate() {
         stats.malformed_requests += 1;
-        write_json(request, 400, &json!({"error": reason}));
-        return;
+        return Reply::json(400, json!({"error": reason}));
     }
     let use_simulated = req.transport.disconnected
         || req.transport.latency_ms.is_some()
         || req.transport.timeout_ms.is_some();
     if use_simulated && !fault_injection {
         stats.malformed_requests += 1;
-        write_json(
-            request,
+        return Reply::json(
             400,
-            &json!({"error": "simulated transport faults are disabled; start the server with --fault-injection"}),
+            json!({"error": "simulated transport faults are disabled; start the server with --fault-injection"}),
         );
-        return;
     }
     let bridge = Bridge::new(req.mode);
 
@@ -561,12 +629,10 @@ fn handle_route(
         )) {
             stats.audit_failures += 1;
             eprintln!("[hil-bridge] audit failure, real order refused: {e}");
-            write_json(
-                request,
+            return Reply::json(
                 503,
-                &json!({"error": "the order could not be recorded in the audit log, so it was not forwarded"}),
+                json!({"error": "the order could not be recorded in the audit log, so it was not forwarded"}),
             );
-            return;
         }
     }
 
@@ -593,35 +659,48 @@ fn handle_route(
         Mode::Real => {
             // Real mode: the report that gates the command must be the twin's. A certificate is checked (signature, command, age, replay);
             // an unsigned report is believed only on the bench setting; anything else is blocked with the reason.
-            // The validity window comes first, so a stale command does not use up the certificate it carries.
-            let report = if let Err(reason) =
-                leases.check(&command.joint, validity.as_ref(), now_ms())
-            {
-                stats.stale_commands += 1;
-                Err(reason)
-            } else if let Some(certificate) = &req.certificate {
-                verify(
-                    certificate,
-                    &command,
-                    &context.interlock.trusted_keys,
-                    &context.interlock.policy,
-                    now_ms(),
-                    nonces,
-                )
-            } else if context.interlock.allow_unsigned_risk {
-                req.risk.ok_or_else(|| {
-                    "no twin risk report: a real command is not forwarded without one".to_string()
-                })
-            } else {
-                Err("a real command needs a risk certificate signed by the twin (field \"certificate\"); a report written by the caller is not accepted".to_string())
+            // The validity window and the joint limits come first, so a stale or impossible command does not use up the certificate it carries.
+            let limits_check = match context.limits {
+                Some(limits) => limits.check(&command.joint, command.position),
+                None => Ok(()),
             };
-            match report {
-                Ok(report) => {
-                    bridge.route_command(command.clone(), Some(report), real_sink, &mut sim_sink)
-                }
-                Err(reason) => {
-                    stats.uncertified += 1;
-                    RouteOutcome::BlockedByInterlock { reason }
+            if let Err(reason) = limits_check {
+                stats.outside_limits += 1;
+                RouteOutcome::BlockedByInterlock { reason }
+            } else {
+                let report = if let Err(reason) =
+                    leases.check(&command.joint, validity.as_ref(), now_ms())
+                {
+                    stats.stale_commands += 1;
+                    Err(reason)
+                } else if let Some(certificate) = &req.certificate {
+                    verify(
+                        certificate,
+                        &command,
+                        &context.interlock.trusted_keys,
+                        &context.interlock.policy,
+                        now_ms(),
+                        nonces,
+                    )
+                } else if context.interlock.allow_unsigned_risk {
+                    req.risk.ok_or_else(|| {
+                        "no twin risk report: a real command is not forwarded without one"
+                            .to_string()
+                    })
+                } else {
+                    Err("a real command needs a risk certificate signed by the twin (field \"certificate\"); a report written by the caller is not accepted".to_string())
+                };
+                match report {
+                    Ok(report) => bridge.route_command(
+                        command.clone(),
+                        Some(report),
+                        real_sink,
+                        &mut sim_sink,
+                    ),
+                    Err(reason) => {
+                        stats.uncertified += 1;
+                        RouteOutcome::BlockedByInterlock { reason }
+                    }
                 }
             }
         }
@@ -658,28 +737,23 @@ fn handle_route(
         RouteOutcome::TransportFailure { .. } => stats.transport_failures += 1,
     }
     eprintln!("{}", outcome.log_line(req.mode));
-    let response = Response::from_string(serde_json::to_value(&outcome).unwrap().to_string())
-        .with_status_code(200)
-        .with_header(json_header())
-        .with_header(header("X-Outcome-Kind", outcome.kind()))
-        .with_header(header(
+    Reply::json(200, serde_json::to_value(&outcome).unwrap())
+        .with("X-Outcome-Kind", outcome.kind())
+        .with(
             "X-Delivered",
             if outcome.delivered() { "true" } else { "false" },
-        ));
-    let _ = request.respond(response);
+        )
 }
 
-fn handle_mirror(request: tiny_http::Request, raw: &str, stats: &mut Stats) {
+fn handle_mirror(raw: &str, stats: &mut Stats) -> Reply {
     let req: MirrorRequest = match serde_json::from_str(raw) {
         Ok(r) => r,
         Err(e) => {
             stats.malformed_requests += 1;
-            write_json(
-                request,
+            return Reply::json(
                 400,
-                &json!({"error": format!("malformed request JSON: {e}")}),
+                json!({"error": format!("malformed request JSON: {e}")}),
             );
-            return;
         }
     };
 
@@ -689,23 +763,18 @@ fn handle_mirror(request: tiny_http::Request, raw: &str, stats: &mut Stats) {
     };
     if let Err(reason) = command.validate() {
         stats.malformed_requests += 1;
-        write_json(request, 400, &json!({"error": reason}));
-        return;
+        return Reply::json(400, json!({"error": reason}));
     }
     let bridge = Bridge::new(Mode::Simulation);
     let mut mirror_sink = RecordingSink::default();
     match bridge.mirror_command(&command, &mut mirror_sink) {
         Ok(()) => {
             stats.mirrored += 1;
-            write_json(request, 200, &json!({"mirrored": true}));
+            Reply::json(200, json!({"mirrored": true}))
         }
         Err(e) => {
             stats.mirror_failures += 1;
-            write_json(
-                request,
-                200,
-                &json!({"mirrored": false, "error": e.to_string()}),
-            );
+            Reply::json(200, json!({"mirrored": false, "error": e.to_string()}))
         }
     }
 }
@@ -1639,5 +1708,194 @@ mod tests {
         );
         assert!(resp.contains("SentReal"), "{resp}");
         assert_eq!(stat(port, "activeLeases"), 0);
+    }
+
+    // ---- the joint limits of the URDF (see limits.rs) ----
+
+    const ARM_URDF: &str = r#"<robot name="arm"><link name="b"/><link name="l"/>
+        <joint name="shoulder" type="revolute"><parent link="b"/><child link="l"/>
+            <limit lower="-1.5" upper="2.0" effort="1" velocity="1"/></joint>
+        <joint name="mount" type="fixed"><parent link="b"/><child link="l"/></joint></robot>"#;
+
+    fn limited_config() -> ServerConfig {
+        ServerConfig {
+            limits: Some(JointLimits::from_urdf(ARM_URDF).unwrap()),
+            ..watched_config(false)
+        }
+    }
+
+    fn real_body(joint: &str, position: f64, certificate: &str) -> String {
+        format!(
+            r#"{{"mode":"real","joint":"{joint}","position":{position},"certificate":{certificate}}}"#
+        )
+    }
+
+    fn certificate_for(joint: &str, position: f64, nonce: &str) -> String {
+        // the certificate of the other tests is for joint "shoulder" at 1.0; the limits are checked before it is, so the content of one for
+        // another command only matters when the command passes the limits
+        let _ = (joint, position);
+        fresh_certificate(nonce)
+    }
+
+    #[test]
+    fn a_real_command_outside_the_range_of_its_joint_is_blocked_before_its_certificate_is_used() {
+        let port = start_with(limited_config());
+        let (status, resp) = post_with(
+            port,
+            "/route",
+            "",
+            &real_body("shoulder", 2.5, &certificate_for("shoulder", 2.5, NONCE_A)),
+        );
+        assert_eq!(status, 200);
+        assert!(resp.contains("BlockedByInterlock"), "{resp}");
+        assert!(resp.contains("outside its limits"), "{resp}");
+        assert_eq!(stat(port, "outsideLimits"), 1);
+        assert_eq!(stat(port, "routedReal"), 0);
+        // the same certificate (same nonce) still works for a command inside the range: it was not spent
+        let (_, ok) = post_with(
+            port,
+            "/route",
+            "",
+            &real_body("shoulder", 1.0, &certificate_for("shoulder", 1.0, NONCE_A)),
+        );
+        assert!(ok.contains("SentReal"), "{ok}");
+    }
+
+    #[test]
+    fn a_real_command_for_a_joint_the_urdf_does_not_have_or_a_fixed_one_is_blocked() {
+        let port = start_with(limited_config());
+        for joint in ["elbow", "mount"] {
+            let (_, resp) = post_with(
+                port,
+                "/route",
+                "",
+                &real_body(joint, 0.0, &certificate_for(joint, 0.0, NONCE_B)),
+            );
+            assert!(resp.contains("BlockedByInterlock"), "{joint}: {resp}");
+        }
+        assert_eq!(stat(port, "outsideLimits"), 2);
+    }
+
+    #[test]
+    fn the_simulation_mode_is_not_gated_by_the_limits_of_the_urdf() {
+        let port = start_with(limited_config());
+        let (_, resp) = post_with(
+            port,
+            "/route",
+            "",
+            r#"{"mode":"simulation","joint":"elbow","position":9.0}"#,
+        );
+        assert!(resp.contains("SentSimulation"), "{resp}");
+        assert_eq!(stat(port, "outsideLimits"), 0);
+    }
+
+    #[test]
+    fn stats_say_how_many_joints_the_urdf_gave_and_how_many_workers_serve() {
+        let port = start_with(limited_config());
+        assert_eq!(stat(port, "urdfLimits"), 2);
+        assert_eq!(stat(port, "workers"), DEFAULT_WORKERS as u64);
+        let (_, bare) = get_with(start_with(ServerConfig::default()), "/stats", "");
+        assert!(bare.contains("\"urdfLimits\":null"), "{bare}");
+    }
+
+    // ---- several workers ----
+
+    #[test]
+    fn a_client_that_holds_a_connection_open_without_finishing_its_request_does_not_stop_the_others(
+    ) {
+        let port = start_with(ServerConfig::default());
+        // half a request line, never the rest: this connection stays stuck for as long as it stays open
+        let mut stuck = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stuck.write_all(b"GET /stats HT").unwrap();
+        // a POST that promised a body and never sends it holds a worker too
+        let mut half_body = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        half_body
+            .write_all(
+                b"POST /route HTTP/1.1
+Host: x
+Content-Type: application/json
+Content-Length: 500
+
+{",
+            )
+            .unwrap();
+        for _ in 0..3 {
+            let (status, _) = get_with(port, "/stats", "");
+            assert_eq!(status, 200);
+        }
+        let (status, resp) = post(
+            port,
+            "/route",
+            r#"{"mode":"simulation","joint":"shoulder","position":1.0}"#,
+        );
+        assert_eq!(status, 200, "{resp}");
+        drop((stuck, half_body));
+    }
+
+    #[test]
+    fn the_watchdog_still_stops_a_joint_while_the_workers_wait_for_a_stuck_client() {
+        let port = start_with(watched_config(true));
+        let mut stuck = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stuck
+            .write_all(
+                b"POST /route HTTP/1.1
+Host: x
+Content-Type: application/json
+Content-Length: 500
+
+{",
+            )
+            .unwrap();
+        let (_, resp) = post_with(
+            port,
+            "/route",
+            "",
+            &windowed_body(&fresh_certificate(NONCE_A), now_ms(), 150, 1),
+        );
+        assert!(resp.contains("SentReal"), "{resp}");
+        let mut stops = 0;
+        for _ in 0..40 {
+            thread::sleep(std::time::Duration::from_millis(50));
+            stops = stat(port, "watchdogStops");
+            if stops > 0 {
+                break;
+            }
+        }
+        assert_eq!(stops, 1);
+        drop(stuck);
+    }
+
+    #[test]
+    fn orders_sent_at_the_same_time_are_all_counted_and_recorded_once() {
+        let port = start_with(ServerConfig {
+            interlock: InterlockConfig {
+                allow_unsigned_risk: true,
+                ..InterlockConfig::default()
+            },
+            ..ServerConfig::default()
+        });
+        let senders: Vec<_> = (0..16)
+            .map(|_| {
+                thread::spawn(move || {
+                    for _ in 0..5 {
+                        let (status, resp) = post(
+                            port,
+                            "/route",
+                            r#"{"mode":"real","joint":"shoulder","position":1.0,"risk":{"collision_imminent":false,"distance_m":2.0}}"#,
+                        );
+                        assert_eq!(status, 200);
+                        assert!(resp.contains("SentReal"), "{resp}");
+                    }
+                })
+            })
+            .collect();
+        for sender in senders {
+            sender.join().unwrap();
+        }
+        assert_eq!(stat(port, "routedReal"), 80);
+        let (_, audit) = get_with(port, "/audit", "");
+        // 80 orders leave 160 records (an order and an outcome each); the body may come in chunks, so they are counted in the text
+        assert_eq!(audit.matches("\"phase\":\"order\"").count(), 80, "{audit}");
+        assert_eq!(audit.matches("\"phase\":\"outcome\"").count(), 80);
     }
 }

@@ -21,3 +21,5 @@ serde_json = "1"
 tiny_http = "0.12"
 # The interlock certificates (src/certificate.rs): the bridge verifies an Ed25519 signature of HYDRA-UMC-TWIN with its public key.
 ed25519-dalek = "2"
+# The URDF of the robot (src/limits.rs): a small read-only XML parser, the same one HYDRA-UMC-PHYSICS-REPLICA uses.
+roxmltree = "0.21"

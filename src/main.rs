@@ -20,6 +20,7 @@ mod audit;
 mod bridge;
 mod certificate;
 mod interlock;
+mod limits;
 mod protocol;
 mod server;
 mod watchdog;
@@ -250,6 +251,35 @@ fn load_watchdog(args: &[String]) -> Result<watchdog::WatchdogConfig, String> {
     Ok(config)
 }
 
+/// The joints and ranges of the robot, from `--urdf FILE` (also HYDRA_UMC_HIL_BRIDGE_URDF). With it a real command for an unknown joint, a
+/// fixed one or a position outside its range is blocked; without it only the shape of the command is checked.
+fn load_limits(args: &[String]) -> Result<Option<limits::JointLimits>, String> {
+    let Some(path) = find_flag(args, "--urdf")
+        .or_else(|| env::var("HYDRA_UMC_HIL_BRIDGE_URDF").ok())
+        .filter(|path| !path.trim().is_empty())
+    else {
+        return Ok(None);
+    };
+    let text =
+        std::fs::read_to_string(&path).map_err(|e| format!("cannot read the URDF {path}: {e}"))?;
+    limits::JointLimits::from_urdf(&text)
+        .map(Some)
+        .map_err(|e| format!("{path}: {e}"))
+}
+
+/// How many requests are served at once, from `--workers` (1 to 256, default 8).
+fn load_workers(args: &[String]) -> Result<usize, String> {
+    match find_flag(args, "--workers") {
+        None => Ok(server::DEFAULT_WORKERS),
+        Some(raw) => match raw.parse::<usize>() {
+            Ok(n) if (1..=256).contains(&n) => Ok(n),
+            _ => Err(format!(
+                "--workers must be a whole number from 1 to 256, got {raw}"
+            )),
+        },
+    }
+}
+
 fn run_serve(args: &[String]) -> ExitCode {
     let addr = find_flag(args, "--addr").unwrap_or_else(|| "127.0.0.1".to_string());
     let port = find_flag(args, "--port").unwrap_or_else(|| "8113".to_string());
@@ -279,6 +309,20 @@ fn run_serve(args: &[String]) -> ExitCode {
     };
     let watchdog = match load_watchdog(args) {
         Ok(watchdog) => watchdog,
+        Err(message) => {
+            eprintln!("[hil-bridge] fatal: {message}");
+            return ExitCode::from(2);
+        }
+    };
+    let limits = match load_limits(args) {
+        Ok(limits) => limits,
+        Err(message) => {
+            eprintln!("[hil-bridge] fatal: {message}");
+            return ExitCode::from(2);
+        }
+    };
+    let workers = match load_workers(args) {
+        Ok(workers) => workers,
         Err(message) => {
             eprintln!("[hil-bridge] fatal: {message}");
             return ExitCode::from(2);
@@ -317,6 +361,11 @@ fn run_serve(args: &[String]) -> ExitCode {
             } else {
                 eprintln!("[hil-bridge] WARNING: --allow-undated-commands is ON: a real command without a validity window stays in force if its producer stops");
             }
+            match &limits {
+                Some(l) => eprintln!("[hil-bridge] {} joint(s) with their ranges read from the URDF: a real command for another joint, a fixed one or a position outside its range is blocked", l.len()),
+                None => eprintln!("[hil-bridge] no --urdf: the joints and their ranges are not known, only the shape of a command is checked"),
+            }
+            eprintln!("[hil-bridge] serving with {workers} worker thread(s)");
             match &audit_log {
                 Some(path) => eprintln!("[hil-bridge] every real order is recorded in {} before it is decided; if the record cannot be written the order is refused", path.display()),
                 None => eprintln!("[hil-bridge] no --audit-log: the last real orders are kept in memory only (GET /audit)"),
@@ -329,6 +378,8 @@ fn run_serve(args: &[String]) -> ExitCode {
                     interlock,
                     audit_log,
                     watchdog,
+                    limits,
+                    workers,
                 },
             );
             ExitCode::SUCCESS
@@ -369,6 +420,21 @@ mod tests {
         assert_eq!(find_flag(&a, "--joint"), None);
         assert_eq!(find_flag(&a, "--position"), Some("1".to_string()));
         assert!(parse_command(&a).is_err());
+    }
+
+    #[test]
+    fn the_number_of_workers_is_a_whole_number_from_1_to_256() {
+        assert_eq!(load_workers(&args(&[])), Ok(server::DEFAULT_WORKERS));
+        assert_eq!(load_workers(&args(&["--workers", "3"])), Ok(3));
+        for bad in ["0", "257", "x", "-1"] {
+            assert!(load_workers(&args(&["--workers", bad])).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_missing_or_wrong_urdf_stops_the_start() {
+        assert_eq!(load_limits(&args(&[])), Ok(None));
+        assert!(load_limits(&args(&["--urdf", "/no/such/file.urdf"])).is_err());
     }
 
     #[test]

@@ -169,6 +169,7 @@ name = "hydra-umc-hil-bridge"
 version = "0.0.9"
 dependencies = [
  "ed25519-dalek",
+ "roxmltree",
  "serde",
  "serde_json",
  "tiny_http",
@@ -233,6 +234,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
  "getrandom",
+]
+
+[[package]]
+name = "roxmltree"
+version = "0.21.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9da7f59328b09405b181fee1018925fad50f157afb43c0c0f5c522c256dd5907"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]

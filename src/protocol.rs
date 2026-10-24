@@ -21,9 +21,8 @@ impl JointCommand {
     /// oversized joint name, or a position that is not a finite number
     /// (`NaN` and the infinities parse as valid `f64` text).
     ///
-    /// Per-joint limits and units are not known to this bridge yet (the
-    /// joint list and its URDF limits live elsewhere), so only the shape
-    /// of the value is checked here.
+    /// Only the shape of the value is checked here; the joints and their
+    /// ranges come from the URDF (`limits.rs`, `serve --urdf`).
     pub fn validate(&self) -> Result<(), String> {
         if self.joint.trim().is_empty() {
             return Err("joint name must not be empty".to_string());
