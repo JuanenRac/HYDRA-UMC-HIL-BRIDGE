@@ -2,6 +2,10 @@
 
 All notable changes to this project are documented here.
 
+## [Unreleased]
+
+- **The layout of the README is checked in the CI:** the validator runs `tools/universal_readme_check.py` and lists, as a warning, what differs from the universal layout of the README.
+
 ## [0.1.0] - The joints and ranges of the robot come from its URDF and requests are served by several workers
 
 - **The joints and ranges of the robot come from its URDF.** `serve --urdf FILE` (or `HYDRA_UMC_HIL_BRIDGE_URDF`) reads the joints with `roxmltree` (`src/limits.rs`): a real command for a joint the URDF does not have, for a fixed joint or for one that follows another (`<mimic>`), or for a position outside the `lower`/`upper` of its `<limit>` is blocked before its certificate or its lease is used, and counted in `GET /stats` (`outsideLimits`, `urdfLimits`). A `continuous` joint has no position limit; a `<limit>` that is missing, inverted or not a number stops the start instead of meaning "no limit". Simulation mode is not gated by the limits. Without `--urdf` nothing changes and the start says so.
