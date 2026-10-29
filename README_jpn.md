@@ -1,23 +1,33 @@
+<!-- =============================================================================
+HYDRA-UMC-HIL-BRIDGE - Hardware-in-the-loop bridge
+Copyright (C) JuanenRac (Electro Hobby 3D) <electrohobby3d@gmail.com>
+GPL-3.0-or-later - see LICENSE
+============================================================================= -->
+
 <p align="center">
   <img src="images/HYDRA_UMC_BANNER.svg" alt="HYDRA-UMC-HIL-BRIDGE banner" width="100%">
 </p>
 
-# 🌉 HYDRA-UMC-HIL-BRIDGE
+# 🔁 HYDRA-UMC-HIL-BRIDGE
 
 <p align="center"><a href="README.md">🇺🇸 English</a> | <a href="README_spa.md">🇪🇸 Español</a> | <a href="README_fra.md">🇫🇷 Français</a> | <a href="README_ita.md">🇮🇹 Italiano</a> | <a href="README_deu.md">🇩🇪 Deutsch</a> | <a href="README_zho.md">🇨🇳 简体中文</a> | 🇯🇵 <b>日本語</b> | <a href="README_por.md">🇵🇹 Português</a></p>
 
 ### ⚡ 実際と仮想の同期のためのハードウェア・イン・ザ・ループインターフェース
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Licencia-GPL%203.0--or--later-blue.svg" alt="GPL 3.0 or later">
-  <img src="https://img.shields.io/badge/Protocol-WebSocket%20%2F%20gRPC-yellow.svg" alt="Protocol">
-  <img src="https://img.shields.io/badge/Feature-Zero--Latency%20Sync-green.svg" alt="Sync">
-  <img src="https://img.shields.io/badge/Stage-%E6%A9%9F%E8%83%BD%E6%AE%B5%E9%9A%8E%20v0-yellow.svg" alt="機能段階 v0">
+  <img src="https://img.shields.io/badge/License-GPL%203.0--or--later-blue.svg" alt="GPL 3.0 or later">
+  <img src="https://img.shields.io/badge/Rust-2021-DEA584.svg" alt="Rust">
+  <img src="https://img.shields.io/badge/Safety-Interlock-gated-red.svg" alt="Safety">
+  <img src="https://img.shields.io/badge/Tests-115%20passing-2ea44f.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Version-0.1.0-0f6cbd.svg" alt="Version">
+  <img src="https://img.shields.io/badge/Maturity-functional-0F6CBD.svg" alt="Maturity">
 </p>
 
 ---
 
 > **安全性とセキュリティの現状:** このエコシステムは認証された安全システムではありません。ハードウェアの E-STOP 経路、ファームウェアが強制する制限やインターロック、検証済みの動作コマンドはまだありません。ファームウェアイメージは CRC32 と共有鍵の HMAC-SHA256 で検査しており、非対称署名ではありません。TLS と相互 TLS は任意で、既定では無効です。独自基板はまだ実装も試験もされていません。ここに書かれた内容を人の安全のために頼る前に、[セキュリティベースライン](https://github.com/JuanenRac/HYDRA-UMC-DOCS/blob/main/docs/SECURITY_BASELINE.md)と[脅威モデル](https://github.com/JuanenRac/HYDRA-UMC-DOCS/blob/main/docs/THREAT_MODEL.md)をお読みください。
+
+---
 
 ## 📋 ひと目で
 
@@ -25,9 +35,12 @@
 |---|---|
 | バージョン | `0.1.0` |
 | 成熟度 | 機能する |
+| テスト | 115 (`cargo test`) |
 | 技術 | Rust / hardware-in-the-loop I/O |
 | 対象 | HYDRA-UMC セルの Raspberry Pi CM5 |
 | 実機での確認 | シミュレーションのみ：エミュレーター、模擬部品、シミュレーターで試験済み。このバージョンについて実機での動作記録はありません |
+
+**移動：** [概要](#-概要) · [アーキテクチャ](#-アーキテクチャ) · [機能](#-機能) · [セキュリティと安全](#-セキュリティと安全) · [インターフェース](#-インターフェース) · [設定](#-設定) · [クイックスタート](#-クイックスタート) · [テスト](#-テスト) · [トラブルシューティング](#-トラブルシューティング) · [リポジトリの構成](#-リポジトリの構成) · [関連プロジェクト](#-関連プロジェクト)
 
 ## 🚦 プロジェクトの状況
 
@@ -38,11 +51,11 @@
 | 領域 | 状態 | ここでの意味 |
 |---|---|---|
 | ソフトウェア | 🟡 | 主な目的では動作します。足りない点は上の正直さの確認に書かれています |
-| テスト | 🟠 | このリポジトリのテスト件数はまだ記録されていません |
+| テスト | 🟢 | 自動テスト 115 件。変更のたびに実行されます |
 | 実機 | 🟠 | シミュレーションのみ：エミュレーター、模擬部品、シミュレーターで試験済み。このバージョンについて実機での動作記録はありません |
 | ドキュメント | 🟢 | 8 言語の README。変更のたびにマニフェストと照合されます |
 
-## 1. 🛠️ 技術概要
+## 🎯 概要
 
 **HYDRA-UMC-HIL-BRIDGE** は、ハードウェア・イン・ザ・ループ(HIL)機能を実現するための通信の幹線を目指しています。物理コントローラーとデジタルツインエンジンの間でコマンドをルーティングして状態をミラーリングしますが、実際のコントローラーはまだ接続されていません。
 
@@ -51,7 +64,50 @@
 に扱われます。逆に、物理ロボットの動きを仮想世界へミラーリングし、
 リモート監視やデジタルツインシャドーイングにも利用できます。
 
-### 主な機能：
+## 🧩 HYDRA-UMC での役割
+
+**HYDRA-UMC-HIL-BRIDGE** は制御インターフェースと、実機または模擬のロボットの間に位置します。実機モードでは、デジタルツインがその関節に対して新しいインターロック証明書を署名したときだけコマンドが関節を動かし、シミュレーションモードでは位置をミラーします。判断を行うだけで、実コントローラーやツインへのトランスポートはこれからです。
+
+## 🏛️ アーキテクチャ
+
+`BRIDGE` でのモードベースの分岐、および `Real Mode` パス上の安全
+インターロックのゲートは、今日すでに実際に動作しています
+（`bridge.rs`/`interlock.rs`）。実際のライブプロセスではなく、メモリ内
+のシンクへルーティングします。実際の `APP`、`TWIN`、`CORE` プロセスに
+実際の接続を通じて触れる部分はすべて、今後の課題のままです。
+
+<p align="center">
+  <img src="images/architecture.svg" alt="HYDRA-UMC-HIL-BRIDGE architecture" width="100%">
+</p>
+
+<details>
+<summary>図のテキスト版（Mermaid）</summary>
+
+```mermaid
+flowchart LR
+    APP["Control Interface - 計画中"] --> BRIDGE["HIL-BRIDGE - 実際の v0 ルーティング"]
+    BRIDGE -- Simulation Mode --> TWIN["HYDRA-UMC-TWIN - 計画中"]
+    BRIDGE -- "Real Mode（インターロック適用 - 実際の v0）" --> CORE["HYDRA-UMC Core (STM32) - 計画中"]
+    CORE -- Feedback --> BRIDGE
+    TWIN -- Feedback --> BRIDGE
+    BRIDGE --> APP
+```
+
+</details>
+
+**この作りにした理由**
+
+* **本ブリッジに `hardware/`/`firmware/`/`os/` フォルダがない理由。** 純粋なソフトウェアです——既存のハードウェア（実際のアプリ、実際の HYDRA-UMC ファームウェア）をデジタルツインに橋渡しするだけで、独自の基板を持ちません。
+* **HYDRA-UMC-TWIN のサブモジュールではなく兄弟プロジェクトである理由。** ハードウェア・イン・ザ・ループのブリッジは、その瞬間に HYDRA-UMC-TWIN 自身のレンダリング/物理ループが何をしていようとも、独立して動作し続ける（そして実際のデバイスのコマンドを流し続ける）必要があります——独立したプロセスであることにより、ツインの再起動が進行中の実際のコマンドを取りこぼすことはありません。
+* **エコシステムの他の部分との関係。** HYDRA-UMC-SUITE、HYDRA-UMC-ANDROID-CONTROL、HYDRA-UMC-IOS-CONTROL が、HYDRA-UMC-TWIN をあたかも実際の HYDRA-UMC-SERVER に支えられたセルであるかのように制御できるようにします——同じ制御インターフェースで、対象がシミュレーションであるという違いだけです。
+* **インターロックがツイン自身の `collision_imminent` フラグを信頼しつつ、最小クリアランスを加えてフェイルクローズにする理由。** ツインがリスクを報告する時点で実際の幾何/物理の推論はすでに済んでいるため、ブリッジは衝突を再導出しません。ただし、1 ミリメートルで「衝突なし」と言うツイン、NaN の距離、レポートがないことは、経路が空いているという主張にはならないため、コマンドをブロックします（`MIN_CLEARANCE_M` = 5 cm。保守的な下限であり認証済みの距離ではありません。それはファームウェアの責任です）。HYDRA-UMC-SAFETY-ZONES の検出と強制の境界をどう反映しているかは、`interlock.rs` のモジュールドキュメントを参照してください。
+* **`Simulation` モードが決してインターロックの対象にならない理由。** 実際のハードウェアではなくツインへコマンドをルーティングすることの意味そのものが、予測された衝突を安全に観察できるようにすることです——そこでブロックしてしまうと、この機能が支えるはずの目的そのものが失われます。
+* **`CommandSink` が今日、メモリ内実装 `RecordingSink` のみを持つトレイトである理由。** 実際の gRPC/WebSocket トランスポートはまだ存在しません（`Cargo.toml` 自身のコメントを参照）——`RecordingSink` はその点について正直です：送信を依頼された内容を記録するだけで、どこにも送信しません。これは HYDRA-UMC-SAFETY-ZONES の `NullEStopRequester` と同じ考え方です。
+* **`CommandSink::send()` が `()` ではなく `Result` を返す理由。** 実際のトランスポートは、インターロックがコマンドを通過させたかどうかとは無関係に、配送に失敗する（タイムアウト、切断）ことがあります——`send()` が失敗しえないなら、ブリッジには実際には届いていないコマンドについて成功を主張することを避ける手段がありません。`SimulatedTransport` は、実際のトランスポートの完成を待たずとも、この失敗経路を今日から実際にテスト可能にするために存在します。
+* **`TransportFailure` が `BlockedByInterlock` とは別の `RouteOutcome` である理由。** どちらも「起きなかった」という点では同じですが、種類が異なります——一方は意図的な安全上の拒否（インターロックが転送しないと決定した）、もう一方はベストエフォートの配送が単に完了しなかったというものです。これらを汎用的な失敗にまとめてしまうと、実際にどの安全層がコマンドを止めたのかが分からなくなります——デバッグに有用であり、両者を異なる扱いにする将来のポリシー（トランスポート失敗のリトライは妥当だが、インターロックによるブロックの後のリトライは妥当ではない）にも有用です。
+
+## ✨ 機能
+
 * 🔑 **任意の Bearer トークン：** ループバックでは API にトークンは不要で、ループバック以外では `serve` はトークンなしでは起動しません（`--token-file` または `HYDRA_UMC_HIL_BRIDGE_TOKEN`）。トークンを設定すると、すべてのリクエストが `Authorization: Bearer <token>` を送る必要があります（一定時間での比較）。マニフェストのヘルスパスである `GET /stats` だけは開いたままです。*(実装済み)*
 * 🛡️ **安全インターロック（v0）：** 実際の `route` サブコマンドは、ツインのリスクレポートが衝突切迫を示すたびに、実際のハードウェア宛てのコマンドをブロックします——今日実際に何が動くのかは下記「正直な現状確認」を参照してください。
 * 🧯 **インターロックはフェイルクローズです（v0）：** `real` モードでは、経路が空いていると伝えるツインのリスクレポートがある場合にだけコマンドを転送します。レポートがなければブロックされ（省略すると以前は「衝突なし」とみなされ、ハードウェアに届いていました）、距離が NaN の場合もブロックされ、ツインが `collision_imminent` を立てていなくても余裕が 5 cm 未満ならブロックされます（`MIN_CLEARANCE_M`）。`--clear-distance メートル` で CLI に空きありのレポートを渡せます。16 KB を超えるリクエストボディは `413` で拒否されます。同じリクエストで呼び出し側が送るレポートは、ツインのトランスポートができるまでは呼び出し側の申告のままです。*（実装済み）*
@@ -66,81 +122,57 @@
 
 **正直な現状確認 —— 今日実際に動くもの：** `route --mode real|simulation --joint 名前 --position 値 [--collision-risk] [--distance メートル] [--transport-latency-ms MS] [--transport-timeout-ms MS] [--transport-disconnected]` は実際のルーティング判断を行います——`simulation` モードは常に送信し、`real` モードは ツインのリスクレポートが無い場合、`--collision-risk` が指定された場合、距離が NaN の場合、または余裕が 5 cm 未満の場合にコマンドをブロックする実際の安全インターロック（`--clear-distance メートル` で安全なレポートを渡せます）の対象になります。`mirror --joint 名前 --position 値` はコマンドを無条件にミラーリングします。`serve` は、一度きりの CLI 呼び出しの代わりに、両方を実際の HTTP JSON 経由でも公開します。3つとも既定ではメモリ内の受信先（`RecordingSink`、実際のコントローラーや実際の HYDRA-UMC-TWIN インスタンスではない）へルーティングされ、上記のトランスポートフラグが渡された場合は実際に失敗しうる（タイムアウト/切断）`SimulatedTransport` へルーティングされます——まだ gRPC/WebSocket トランスポートは存在しません。実際に出荷済みの内容は [`CHANGELOG.md`](CHANGELOG.md) を、すべてのコマンド/エンドポイントは [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) を、まだ残っている作業は下記のロードマップを参照してください。
 
----
+## 🔒 セキュリティと安全
 
-## 2. 🔄 HIL 同期フロー
+| 脅威 | 防御 | 場所 |
+|---|---|---|
+| 衝突に向かって関節を動かす | 実機モードのコマンドには、ツインが署名した ed25519 のインターロック証明書（ドメイン `hydra-umc-interlock-certificate-v1`）が必要で、古さは 2000 ms 以内（`--certificate-max-age-ms`）、未来方向は 1000 ms 以内、再利用不可（8192 個のナンスを記憶）、クリアランスは 0.05 m 以上です | `certificate.rs`, `interlock.rs` |
+| 証明書なし・日付なし・有効期間が巨大なコマンド | 実機モードで `--twin-public-key-file`（または `HYDRA_UMC_HIL_BRIDGE_TWIN_KEY_FILE`）がなければ全コマンドがブロックされます。`--allow-unsigned-risk` はベンチ用の設定で、日付のないコマンドには `--allow-undated-commands` が必要、有効期間は `--max-valid-for-ms` で上限が付きます | `main.rs` |
+| 未知または範囲外の関節、リンクの喪失 | `--urdf`（または `HYDRA_UMC_HIL_BRIDGE_URDF`）が関節と範囲を定義し、なければ範囲の確認はありません。ウォッチドッグ（50 ms 周期）は、ワーカースレッドが忙しくてもリースが切れた関節を停止します | `limits.rs`, `server.rs`, `watchdog.rs` |
+| 匿名アクセス、大きなボディ、遅いリクエスト | 16 文字以上の Bearer トークン（`HYDRA_UMC_HIL_BRIDGE_TOKEN` または `--token-file`）。ボディは最大 16 KiB（`413`）、ワーカーは既定 8（`--workers`、1〜256）、各判断は 200 件の監査リングに入ります（`--audit-log` でファイルにも保存） | `access.rs`, `server.rs`, `audit.rs` |
 
-`BRIDGE` でのモードベースの分岐、および `Real Mode` パス上の安全
-インターロックのゲートは、今日すでに実際に動作しています
-（`bridge.rs`/`interlock.rs`）。実際のライブプロセスではなく、メモリ内
-のシンクへルーティングします。実際の `APP`、`TWIN`、`CORE` プロセスに
-実際の接続を通じて触れる部分はすべて、今後の課題のままです。
+**絶対にしないこと：** 実機モードでは新しい署名付き証明書なしに関節を動かすことはなく、実際のロボットはまだ動かしていません。
 
-```mermaid
-flowchart LR
-    APP["Control Interface - 計画中"] --> BRIDGE["HIL-BRIDGE - 実際の v0 ルーティング"]
-    BRIDGE -- Simulation Mode --> TWIN["HYDRA-UMC-TWIN - 計画中"]
-    BRIDGE -- "Real Mode（インターロック適用 - 実際の v0）" --> CORE["HYDRA-UMC Core (STM32) - 計画中"]
-    CORE -- Feedback --> BRIDGE
-    TWIN -- Feedback --> BRIDGE
-    BRIDGE --> APP
+## 🔌 インターフェース
+
+`127.0.0.1:8113` の HTTP API とコマンドラインがあり、どちらも同じ判断ロジックに届きます。`Content-Type` は必須です（なければ `415`）。詳しくは `docs/CLI_REFERENCE.md` を参照してください。
+
+| トピックまたはルート | 内容 |
+|---|---|
+| `POST /route` | 関節（実機または模擬）へのコマンドを判断 |
+| `POST /mirror` | 実機側と仮想側で位置をミラー |
+| `GET /stats`, `GET /audit` | カウンターと直近の判断のリング |
+| `serve` | `serve [--addr 127.0.0.1] [--port 8113] [--workers N] [--token-file FILE]`。単発のコマンドラインは `--joint --position --mode --collision-risk --distance --clear-distance` を取ります |
+
+## ⚙️ 設定
+
+| 変数 | 既定値 | 設定する内容 |
+|---|---|---|
+| `HYDRA_UMC_HIL_BRIDGE_TOKEN`, `--token-file` | トークンなし | Bearer トークン（16 文字以上） |
+| `HYDRA_UMC_HIL_BRIDGE_TWIN_KEY_FILE`, `--twin-public-key-file` | 未設定 | ツインの公開鍵。なければ実機モードは全コマンドをブロック |
+| `HYDRA_UMC_HIL_BRIDGE_ALLOW_UNSIGNED_RISK` | `0` | `1` で証明書なしのコマンドを受け付ける（ベンチ専用） |
+| `HYDRA_UMC_HIL_BRIDGE_ALLOW_UNDATED_COMMANDS`, `--max-valid-for-ms` | オフ | 日付のないコマンドの受け入れ、コマンドの有効期間の上限 |
+| `HYDRA_UMC_HIL_BRIDGE_URDF`, `--urdf` | 未設定 | 関節と範囲を検査する URDF |
+| `HYDRA_UMC_HIL_BRIDGE_AUDIT_LOG`, `--audit-log` | リングのみ | 監査エントリーをこのファイルにも保存 |
+| `--certificate-max-age-ms`, `--workers` | `2000`, `8` | 証明書の古さの上限、ワーカースレッド数（1〜256） |
+
+## 🚀 クイックスタート
+
+最近の安定版 Rust ツールチェーン（`cargo`）が必要です。Python 3 はプロジェクトのツールにだけ必要です。
+
+```bash
+cargo test                                                    # 115 tests, no hardware
+bash run.sh        # Linux, macOS (run.bat on Windows)
+cargo run --release -- serve --port 8113 --token-file token.txt   # real mode also needs --twin-public-key-file
 ```
 
----
+## 🧪 テスト
 
-## 3. 🧱 アーキテクチャと設計上の決定
+`cargo test` で Rust のテスト 115 件を実行します。テストは `src/` のモジュール内にあり、ハードウェアもネットワークも不要です。
 
-* **本ブリッジに `hardware/`/`firmware/`/`os/` フォルダがない理由。** 純粋なソフトウェアです——既存のハードウェア（実際のアプリ、実際の HYDRA-UMC ファームウェア）をデジタルツインに橋渡しするだけで、独自の基板を持ちません。
-* **HYDRA-UMC-TWIN のサブモジュールではなく兄弟プロジェクトである理由。** ハードウェア・イン・ザ・ループのブリッジは、その瞬間に HYDRA-UMC-TWIN 自身のレンダリング/物理ループが何をしていようとも、独立して動作し続ける（そして実際のデバイスのコマンドを流し続ける）必要があります——独立したプロセスであることにより、ツインの再起動が進行中の実際のコマンドを取りこぼすことはありません。
-* **エコシステムの他の部分との関係。** HYDRA-UMC-SUITE、HYDRA-UMC-ANDROID-CONTROL、HYDRA-UMC-IOS-CONTROL が、HYDRA-UMC-TWIN をあたかも実際の HYDRA-UMC-SERVER に支えられたセルであるかのように制御できるようにします——同じ制御インターフェースで、対象がシミュレーションであるという違いだけです。
-* **インターロックがツイン自身の `collision_imminent` フラグを信頼しつつ、最小クリアランスを加えてフェイルクローズにする理由。** ツインがリスクを報告する時点で実際の幾何/物理の推論はすでに済んでいるため、ブリッジは衝突を再導出しません。ただし、1 ミリメートルで「衝突なし」と言うツイン、NaN の距離、レポートがないことは、経路が空いているという主張にはならないため、コマンドをブロックします（`MIN_CLEARANCE_M` = 5 cm。保守的な下限であり認証済みの距離ではありません。それはファームウェアの責任です）。HYDRA-UMC-SAFETY-ZONES の検出と強制の境界をどう反映しているかは、`interlock.rs` のモジュールドキュメントを参照してください。
-* **`Simulation` モードが決してインターロックの対象にならない理由。** 実際のハードウェアではなくツインへコマンドをルーティングすることの意味そのものが、予測された衝突を安全に観察できるようにすることです——そこでブロックしてしまうと、この機能が支えるはずの目的そのものが失われます。
-* **`CommandSink` が今日、メモリ内実装 `RecordingSink` のみを持つトレイトである理由。** 実際の gRPC/WebSocket トランスポートはまだ存在しません（`Cargo.toml` 自身のコメントを参照）——`RecordingSink` はその点について正直です：送信を依頼された内容を記録するだけで、どこにも送信しません。これは HYDRA-UMC-SAFETY-ZONES の `NullEStopRequester` と同じ考え方です。
-* **`CommandSink::send()` が `()` ではなく `Result` を返す理由。** 実際のトランスポートは、インターロックがコマンドを通過させたかどうかとは無関係に、配送に失敗する（タイムアウト、切断）ことがあります——`send()` が失敗しえないなら、ブリッジには実際には届いていないコマンドについて成功を主張することを避ける手段がありません。`SimulatedTransport` は、実際のトランスポートの完成を待たずとも、この失敗経路を今日から実際にテスト可能にするために存在します。
-* **`TransportFailure` が `BlockedByInterlock` とは別の `RouteOutcome` である理由。** どちらも「起きなかった」という点では同じですが、種類が異なります——一方は意図的な安全上の拒否（インターロックが転送しないと決定した）、もう一方はベストエフォートの配送が単に完了しなかったというものです。これらを汎用的な失敗にまとめてしまうと、実際にどの安全層がコマンドを止めたのかが分からなくなります——デバッグに有用であり、両者を異なる扱いにする将来のポリシー（トランスポート失敗のリトライは妥当だが、インターロックによるブロックの後のリトライは妥当ではない）にも有用です。
+CI は `HYDRA_UMC_CI=1 python tools/ci_validate.py` を実行し、マニフェスト、文書、8 つの README、図を検査します。
 
----
-
-## 📂 リポジトリ構成
-
-純粋なソフトウェアブリッジであり、独自のハードウェア設計を持たないため、
-本プロジェクトは `hardware/`、`firmware/`、`os/` フォルダを持たず、
-リポジトリ構造ポリシーに従っています。
-
-```text
-HYDRA-UMC-HIL-BRIDGE/
-├── src/
-│   ├── protocol.rs       # 実際の JointCommand/Mode 型
-│   ├── interlock.rs      # 実際の安全インターロック判断
-│   ├── bridge.rs         # 実際のモードベースルーティング + ミラーリング + CommandSink/SimulatedTransport
-│   ├── certificate.rs    # 双子の Ed25519 リスク証明書を検証:コマンドへの紐付け、鮮度、一度だけの使用
-│   ├── audit.rs          # 実機への各指令を誰が送ったか:判断前に JSON 行を書き込み、直近の記録はメモリに保持
-│   ├── server.rs         # シンプルなJSON/HTTPサーフェス(tiny_http、ブロッキング、非同期ランタイムなし)
-│   ├── main.rs           # エントリポイント + 実際の `route`/`mirror` サブコマンド
-│   ├── access.rs         # HTTP API 用の任意の Bearer トークン (ループバックでは不要、それ以外では必須)
-│   ├── limits.rs         # ロボットの関節の上限・下限 (URDF から読み込み)
-│   └── watchdog.rs       # 実コマンドの受信側ウォッチドッグ (各コマンドは短時間しか有効でない)
-├── docs/                # ドキュメントと統合ガイド
-├── images/              # メディアと図表
-├── systemd/
-│   └── hydra-umc-hil-bridge.service # ローカルCM5 route/mirror APIのsystemdユニット
-├── tools/
-│   ├── build_test.py    # バージョンを増やさないビルドチェック
-│   ├── ci_validate.py   # CI が使用するマニフェスト/CHANGELOG/ドキュメント検証
-│   ├── _doc_policy.py   # ファミリー共通のドキュメント規則 (HYDRA-UMC-SDK のコピーで、同期を維持)
-│   ├── _readme_parity.py # 8つの README が同じ構造であることの検査 (HYDRA-UMC-SDK のコピーで、同期を維持)
-│   └── hydra_project_tool.py # すべてのリポジトリで共通のコマンド: validate、test、ci、version、status、bump
-├── Cargo.toml           # パッケージメタデータ、依存関係、オドメーターバージョン
-├── bump_version.py      # オドメーター式バージョンインクリメント（明示的な `bump` コマンドのみが実行）
-├── bump_manifest_version.py # hydra-umc.project.json のバージョンをネイティブ版と同期(--sync)
-├── build.sh / build.bat # バージョンを増加させ、`cargo test`、その後 `cargo build --release` を実行
-├── build-test.sh / build-test.bat # バージョンを増やさないビルドチェック
-└── run.sh / run.bat     # コンパイル済みの release バイナリを実行（引数を転送）
-```
-
----
-
-## 🏗️ ビルドと実行
+## 🏗️ ビルドとリリース
 
 Rust ツールチェーン（`cargo`/`rustc`、[rustup](https://rustup.rs) 経由で
 インストール）と Python 3.10+（`bump_version.py` のみに使用）が必要です。
@@ -216,15 +248,63 @@ curl -X POST http://127.0.0.1:8113/route \
 ——実際の gRPC/WebSocket トランスポート作業が始まった際に他に何が
 追加されるかについては、その内部のコメントを参照してください。
 
----
+## 🩺 トラブルシューティング
 
-## 🚀 ロードマップ
+| 表示 | 原因 | 対処 |
+|---|---|---|
+| every command is blocked in real mode | ツインの公開鍵が指定されていません | `--twin-public-key-file` を指定します（ベンチでのみ `--allow-unsigned-risk`） |
+| a certificate is refused | 2000 ms より古い、未来すぎる、再利用された、またはクリアランスが 0.05 m 未満です | コマンドごとにツインに新しく署名させ、両側の時計を近づけます |
+| `415`, `413` | `Content-Type` がないか、ボディが 16 KiB を超えています | `Content-Type: application/json` とより小さなボディを送ります |
+
+## 📂 リポジトリの構成
+
+<p align="center">
+  <img src="images/repository-structure.svg" alt="Repository structure of HYDRA-UMC-HIL-BRIDGE" width="100%">
+</p>
+
+<details>
+<summary>ツリーのテキスト版</summary>
+
+```text
+HYDRA-UMC-HIL-BRIDGE/
+├── src/
+│   ├── bridge.rs                                経路とミラーの判断
+│   ├── certificate.rs                           署名付きインターロック証明書（ed25519）
+│   ├── interlock.rs limits.rs                   インターロック規則と URDF の関節制限
+│   ├── server.rs                                HTTP API、ワーカー、ウォッチドッグ
+│   ├── watchdog.rs                              リース切れで関節を停止
+│   ├── access.rs audit.rs                       Bearer トークンと監査リング
+│   └── protocol.rs main.rs                      メッセージ形式、CLI、起動
+├── docs/                                        コマンドラインのリファレンスとインターロック証明書
+├── systemd/                                     CM5 用のサービスユニット
+├── tools/                                       ビルド・テスト実行、バージョン引き上げ、CI 検証、README と図の生成・検査
+├── images/                                      バナーと README の図
+├── .github/                                     CI ワークフローと Issue テンプレート
+├── hydra-umc.project.json                       マニフェスト：バージョン・成熟度・ファミリー
+├── CHANGELOG.md                                 各バージョンの変更点
+├── build.sh build.bat                           ビルドスクリプト（バージョンは変えません）
+├── build-test.sh build-test.bat                 ビルドスクリプト（バージョンは変えません）
+├── test.sh test.bat                             テストを実行
+├── Cargo.toml / Cargo.lock                      Rust パッケージと固定した依存関係
+├── bump_version.py / bump_manifest_version.py   明示的なバージョン引き上げ
+├── run.sh run.bat                               サービスを起動
+└── SECURITY.md SUPPORT.md CONTRIBUTING.md CODE_OF_CONDUCT.md LICENSE LICENSE.md
+```
+
+</details>
+
+## 🗺️ ロードマップと既知の制限
+
+**現時点の既知の制限**
+
 * **フェーズ 1：** リアルタイムハードウェアテレメトリとのデジタルツイン同期、サブ 10ms の遅延。
 * **フェーズ 2：** 産業グレードのシミュレーター（Isaac Sim）との Physics Replica 統合、変形体サポート。
 * **フェーズ 3：** 分散型フェイルオーバーと早期センサー劣化検知のためのノード自己修復自動化パターン。
 * **フェーズ 4：** マルチコントローラー HIL 同期（スウォーム HIL）とフォトリアリスティックな合成データ生成のサポート。
 
----
+## 🌍 言語
+
+この README とリポジトリの文書は、英語・スペイン語・ドイツ語・フランス語・イタリア語・日本語・中国語・ポルトガル語（ポルトガル）の 8 言語で提供されています。8 つのファイルは同時に書かれ、同じ節と同じリンクを持つことを CI が確認します。 このリポジトリには独自の画面もメッセージカタログもないため、翻訳すべきインターフェース文字列はありません。
 
 ## 🔗 関連プロジェクト
 
@@ -317,22 +397,28 @@ curl -X POST http://127.0.0.1:8113/route \
 - **[HYDRA-UMC-OPS-AGENT](https://github.com/JuanenRac/HYDRA-UMC-OPS-AGENT)** — 保守インシデントコーディネーター: 低権限のエッジ役割がサニタイズされたインベントリ/ヘルスのスナップショットを収集し、コントロールプレーン役割がそれを読み取り専用でレンダリングして AI プロバイダーに診断の提案を依頼します - パッチを適用することも、何かをデプロイすることも決してありません。
 - **[HYDRA-UMC-DEV-SERVER](https://github.com/JuanenRac/HYDRA-UMC-DEV-SERVER)** — 再現可能な開発ホスト（Raspberry Pi 5 / CM5）。エコシステムのソースコードを保管し、永続キューのもとで境界の明確なビルド/テストタスクを実行する。運用中の CM5 とは明確に異なる、開発専用の役割。
 
+## 📚 ドキュメント
 
----
+さらに読むには：
 
-## 📚 ドキュメント & コミュニティ
+* [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md) - コマンドラインの全オプション、HTTP ルート、エラー
+* [docs/INTERLOCK_CERTIFICATE.md](docs/INTERLOCK_CERTIFICATE.md) - 署名付きインターロック証明書の内容と検証方法
+* [エコシステムのセキュリティ基準](https://github.com/JuanenRac/HYDRA-UMC-DOCS/blob/main/docs/SECURITY_BASELINE.md)
+* [エコシステムの脅威モデル](https://github.com/JuanenRac/HYDRA-UMC-DOCS/blob/main/docs/THREAT_MODEL.md)
+* [このリポジトリの変更履歴](CHANGELOG.md)
+* [このリポジトリのライセンス](LICENSE.md)
 
-- **[docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md)** — すべての `route`/`mirror`/`serve` 呼び出し、ビルド済みリリースバイナリから実際に取得した出力、終了コード表、そして `POST /route`/`POST /mirror`/`GET /stats` の HTTP JSON 契約。
-- **[CONTRIBUTING.md](CONTRIBUTING.md)** —— プルリクエストのための技術スタックとコーディング指針。
-- **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)** —— このコミュニティで期待される行動規範。
-- **[SECURITY.md](SECURITY.md)** —— 脆弱性の報告方法と、このプロジェクトの実際のセキュリティ重点領域。
-- **[SUPPORT.md](SUPPORT.md)** —— 質問の投稿先とバグの報告先。
-- **[LICENSE.md](LICENSE.md)** —— このプロジェクト自身のライセンス。
+## 🤝 コントリビュートとコミュニティ
+
+* プルリクエストの前に `HYDRA_UMC_CI=1 py -3 tools/ci_validate.py`（または `HYDRA_UMC_CI=1 python3 tools/ci_validate.py`）を実行してください。`CI_VALIDATION=PASS` と表示される必要があります。この確認に `build.sh` や `build.bat` は使わないでください。ビルドは検査ではありません。
+* 8 つの README は HYDRA-UMC-DOCS の 1 つのソースから書かれます。手で編集しないでください。ソースを変更し、`tools/make_readmes.py` で書き直します。
+* 実行していないことを README に書かないでください。事実であれば「シミュレーションのみ」「実機では未確認」と書きます。
+* [CONTRIBUTING.md](CONTRIBUTING.md)、[行動規範](CODE_OF_CONDUCT.md)、[SECURITY.md](SECURITY.md)、[SUPPORT.md](SUPPORT.md) を参照してください。
 
 ## 👤 作者
-**JuanenRac** (Electro Hobby 3D)
-📧 electrohobby3d@gmail.com
-📺 [youtube.com/@electrohobby3d](https://youtube.com/@electrohobby3d)
+
+**JuanenRac (Electro Hobby 3D)** · electrohobby3d@gmail.com
 
 ## 📜 ライセンス
-GPL-3.0-or-later —— 詳細は LICENSE を参照してください。
+
+GPL-3.0-or-later - [LICENSE](LICENSE).

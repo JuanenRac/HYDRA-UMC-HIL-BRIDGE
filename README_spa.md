@@ -1,23 +1,33 @@
+<!-- =============================================================================
+HYDRA-UMC-HIL-BRIDGE - Hardware-in-the-loop bridge
+Copyright (C) JuanenRac (Electro Hobby 3D) <electrohobby3d@gmail.com>
+GPL-3.0-or-later - see LICENSE
+============================================================================= -->
+
 <p align="center">
   <img src="images/HYDRA_UMC_BANNER.svg" alt="HYDRA-UMC-HIL-BRIDGE banner" width="100%">
 </p>
 
-# 🌉 HYDRA-UMC-HIL-BRIDGE
+# 🔁 HYDRA-UMC-HIL-BRIDGE
 
 <p align="center"><a href="README.md">🇺🇸 English</a> | 🇪🇸 <b>Español</b> | <a href="README_fra.md">🇫🇷 Français</a> | <a href="README_ita.md">🇮🇹 Italiano</a> | <a href="README_deu.md">🇩🇪 Deutsch</a> | <a href="README_zho.md">🇨🇳 简体中文</a> | <a href="README_jpn.md">🇯🇵 日本語</a> | <a href="README_por.md">🇵🇹 Português</a></p>
 
 ### ⚡ Interfaz Hardware-in-the-Loop para Sincronización Real vs Virtual
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Licencia-GPL%203.0--or--later-blue.svg" alt="GPL 3.0 or later">
-  <img src="https://img.shields.io/badge/Protocolo-WebSocket%20%2F%20gRPC-yellow.svg" alt="Protocol">
-  <img src="https://img.shields.io/badge/Función-Sync%20Latencia%20Cero-green.svg" alt="Sync">
-  <img src="https://img.shields.io/badge/Etapa-Funcional%20v0-yellow.svg" alt="Etapa funcional v0">
+  <img src="https://img.shields.io/badge/License-GPL%203.0--or--later-blue.svg" alt="GPL 3.0 or later">
+  <img src="https://img.shields.io/badge/Rust-2021-DEA584.svg" alt="Rust">
+  <img src="https://img.shields.io/badge/Safety-Interlock-gated-red.svg" alt="Safety">
+  <img src="https://img.shields.io/badge/Tests-115%20passing-2ea44f.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Version-0.1.0-0f6cbd.svg" alt="Version">
+  <img src="https://img.shields.io/badge/Maturity-functional-0F6CBD.svg" alt="Maturity">
 </p>
 
 ---
 
 > **Estado de seguridad física y de ciberseguridad:** este ecosistema no es un sistema de seguridad certificado. Todavía no existe una ruta de E-STOP por hardware, ni límites ni enclavamientos aplicados por el firmware, ni un comando de movimiento verificado; las imágenes de firmware se comprueban con CRC32 y un HMAC-SHA256 de clave compartida, no con una firma asimétrica; TLS y TLS mutuo son opcionales y están desactivados por defecto; aún no se ha poblado ni probado ninguna placa propia. Lee la [línea base de seguridad](https://github.com/JuanenRac/HYDRA-UMC-DOCS/blob/main/docs/SECURITY_BASELINE.md) y el [modelo de amenazas](https://github.com/JuanenRac/HYDRA-UMC-DOCS/blob/main/docs/THREAT_MODEL.md) antes de fiarte de cualquier afirmación de aquí para la seguridad de una persona.
+
+---
 
 ## 📋 De un vistazo
 
@@ -25,9 +35,12 @@
 |---|---|
 | Versión | `0.1.0` |
 | Madurez | Funcional |
+| Tests | 115 (`cargo test`) |
 | Tecnología | Rust / hardware-in-the-loop I/O |
 | Destino | La Raspberry Pi CM5 de una celda HYDRA-UMC |
 | En hardware real | Solo simulado: probado con emuladores, dobles de prueba o simuladores; no consta ninguna ejecución en hardware real para esta versión |
+
+**Ir a:** [Resumen](#-resumen) · [Arquitectura](#-arquitectura) · [Funciones](#-funciones) · [Seguridad y protección](#-seguridad-y-protección) · [Interfaces](#-interfaces) · [Configuración](#-configuración) · [Inicio rápido](#-inicio-rápido) · [Pruebas](#-pruebas) · [Resolución de problemas](#-resolución-de-problemas) · [Estructura del repositorio](#-estructura-del-repositorio) · [Proyectos relacionados](#-proyectos-relacionados)
 
 ## 🚦 Estado del proyecto
 
@@ -38,17 +51,60 @@ Cada línea es una parte de este repositorio y la luz dice hasta dónde llega ho
 | Área | Estado | Qué significa aquí |
 |---|---|---|
 | Software | 🟡 | Funciona para su propósito principal; la comprobación de honestidad de arriba lista lo que aún falta |
-| Pruebas | 🟠 | Todavía no consta el número de pruebas de este repositorio |
+| Pruebas | 🟢 | 115 pruebas automáticas, ejecutadas en cada cambio |
 | Hardware real | 🟠 | Solo simulado: probado con emuladores, dobles de prueba o simuladores; no consta ninguna ejecución en hardware real para esta versión |
 | Documentación | 🟢 | README en ocho idiomas, comprobado contra el manifiesto en cada cambio |
 
-## 1. 🛠️ VISIÓN GENERAL TÉCNICA
+## 🎯 Resumen
 
 **HYDRA-UMC-HIL-BRIDGE** es la arteria de comunicación pensada para habilitar la funcionalidad Hardware-in-the-Loop (HIL). Enruta comandos entre los controladores físicos y el motor de Digital Twin y refleja el estado entre ambos; todavía no se le ha conectado ningún controlador real.
 
 Permite a los desarrolladores enviar comandos desde cualquier interfaz (App, Suite, Studio) al simulador como si fuera un robot físico y, a la inversa, puede reflejar los movimientos de un robot físico en el mundo virtual para supervisión remota y seguimiento (shadowing) del gemelo digital.
 
-### Características Clave:
+## 🧩 Papel en HYDRA-UMC
+
+**HYDRA-UMC-HIL-BRIDGE** está entre una interfaz de control y un robot que puede ser real o simulado. En modo real una orden mueve una articulación solo cuando el gemelo digital ha firmado un certificado de enclavamiento reciente para ella; en modo simulación el bridge refleja la posición. Decide; los transportes al controlador real y al gemelo están por llegar.
+
+## 🏛️ Arquitectura
+
+La división por modo en `BRIDGE` y la compuerta del enclavamiento de
+seguridad en la ruta `Modo Real` son reales hoy (`bridge.rs`/
+`interlock.rs`), encaminando hacia un receptor en memoria en vez de un
+proceso real en vivo. Todo lo que toca un proceso real `APP`, `TWIN` o
+`CORE` mediante una conexión real sigue siendo trabajo futuro.
+
+<p align="center">
+  <img src="images/architecture.svg" alt="HYDRA-UMC-HIL-BRIDGE architecture" width="100%">
+</p>
+
+<details>
+<summary>Versión en texto del diagrama (Mermaid)</summary>
+
+```mermaid
+flowchart LR
+    APP["Interfaz de Control - planeado"] --> BRIDGE["HIL-BRIDGE - encaminamiento real v0"]
+    BRIDGE -- Modo Simulación --> TWIN["HYDRA-UMC-TWIN - planeado"]
+    BRIDGE -- "Modo Real (con enclavamiento - real v0)" --> CORE["Núcleo HYDRA-UMC (STM32) - planeado"]
+    CORE -- Feedback --> BRIDGE
+    TWIN -- Feedback --> BRIDGE
+    BRIDGE --> APP
+```
+
+</details>
+
+**Por qué está hecho así**
+
+* **Por qué este puente no tiene carpetas `hardware/`/`firmware/`/`os/`.** Software puro - conecta hardware ya existente (apps reales, firmware real de HYDRA-UMC) con el gemelo digital, sin placa propia.
+* **Por qué es hermano, no un submódulo, de HYDRA-UMC-TWIN.** Un puente hardware-in-the-loop necesita seguir funcionando (y seguir dejando fluir los comandos de un dispositivo real) con independencia de lo que esté haciendo en ese instante el propio bucle de renderizado/física de HYDRA-UMC-TWIN - un proceso separado significa que un reinicio del gemelo no descarta un comando real en curso.
+* **Cómo encaja en el resto del ecosistema.** Permite que HYDRA-UMC-SUITE, HYDRA-UMC-ANDROID-CONTROL y HYDRA-UMC-IOS-CONTROL controlen HYDRA-UMC-TWIN como si fuera una célula real respaldada por HYDRA-UMC-SERVER - la misma superficie de control, un objetivo simulado.
+* **Por qué el interbloqueo confía en el propio indicador `collision_imminent` del gemelo, y aun así añade una holgura mínima y falla en cerrado.** El gemelo ya ha hecho el razonamiento geométrico/físico real cuando informa del riesgo, así que el puente no vuelve a derivar colisiones; pero un gemelo que dice "sin colisión" a un milímetro, una distancia NaN o la ausencia de informe no son una afirmación de que el camino esté libre, así que bloquean el comando (`MIN_CLEARANCE_M` = 5 cm, un suelo conservador y no una distancia certificada: eso es del firmware). Mira la documentación del módulo `interlock.rs` para ver cómo refleja la frontera detectar-vs-imponer de HYDRA-UMC-SAFETY-ZONES.
+* **Por qué el modo `Simulation` nunca está sujeto al enclavamiento.** Todo el sentido de encaminar un comando hacia el gemelo en vez de hardware real es poder ver una colisión predicha desarrollarse de forma segura - bloquearla ahí anularía la propia función que existe para respaldar.
+* **Por qué `CommandSink` es un trait con solo una implementación en memoria `RecordingSink` hoy.** Todavía no existe ningún transporte gRPC/WebSocket real (ver el propio comentario de `Cargo.toml`) - `RecordingSink` es honesto al respecto: registra lo que se le pidió enviar sin transmitir a ningún sitio, el mismo razonamiento que `NullEStopRequester` en HYDRA-UMC-SAFETY-ZONES.
+* **Por qué `CommandSink::send()` devuelve un `Result` en vez de `()`.** Un transporte real puede fallar en la entrega (timeout, desconexión) con independencia de si el enclavamiento permitió el comando - si `send()` no puede fallar, el puente no tiene forma de evitar afirmar éxito ante un comando que nunca llegó de verdad. `SimulatedTransport` existe justamente para que ese camino de fallo sea real y testeable hoy, sin esperar a que exista un transporte real.
+* **Por qué `TransportFailure` es un `RouteOutcome` separado de `BlockedByInterlock`.** Son dos tipos distintos de "no ocurrió": uno es un rechazo deliberado de seguridad (el enclavamiento decidió no reenviarlo), el otro es una entrega de mejor esfuerzo que simplemente no se completó. Fusionarlos en un fallo genérico ocultaría qué capa de seguridad detuvo realmente el comando - útil para depurar y para cualquier política futura que los trate de forma distinta (reintentar un fallo de transporte es razonable; reintentar tras un bloqueo del enclavamiento no lo es).
+
+## ✨ Funciones
+
 * 🔑 **Token Bearer opcional:** en loopback la API no necesita token; fuera de loopback `serve` se niega a arrancar sin uno (`--token-file` o `HYDRA_UMC_HIL_BRIDGE_TOKEN`). Con un token configurado, toda petición debe enviar `Authorization: Bearer <token>` (comparación en tiempo constante); solo `GET /stats`, la ruta de salud del manifiesto, queda abierta. *(implementado)*
 * 🛡️ **Enclavamiento de Seguridad (v0):** el subcomando real `route` bloquea un comando destinado a hardware real siempre que un reporte de riesgo del gemelo indique una colisión inminente - ver "Comprobación de honestidad" abajo para lo que funciona hoy exactamente.
 * 🧯 **El interbloqueo falla en cerrado (v0):** en modo `real` un comando solo se reenvía con un informe de riesgo del gemelo que diga que el camino está libre: sin informe se bloquea (omitirlo equivalía a "sin colisión", suficiente para llegar al hardware), una distancia NaN lo bloquea, y también menos de 5 cm de holgura aunque el gemelo no levantara `collision_imminent` (`MIN_CLEARANCE_M`). `--clear-distance METROS` da un informe de camino libre a la CLI; los cuerpos de petición de más de 16 KB se rechazan con `413`. Un informe que el llamante envía en la misma petición sigue siendo palabra del llamante hasta que exista el transporte del gemelo. *(implementado)*
@@ -63,80 +119,57 @@ Permite a los desarrolladores enviar comandos desde cualquier interfaz (App, Sui
 
 **Comprobación de honestidad - qué funciona hoy de verdad:** `route --mode real|simulation --joint NOMBRE --position VALOR [--collision-risk] [--distance METROS] [--transport-latency-ms MS] [--transport-timeout-ms MS] [--transport-disconnected]` toma una decisión real de encaminamiento - el modo `simulation` siempre envía, el modo `real` está sujeto a un enclavamiento de seguridad real que bloquea el comando cuando no hay informe de riesgo del gemelo, cuando se indica `--collision-risk`, cuando la distancia es NaN o cuando hay menos de 5 cm de holgura (`--clear-distance METROS` aporta un informe despejado). `mirror --joint NOMBRE --position VALOR` refleja un comando incondicionalmente. `serve` expone ambos por HTTP JSON real en vez de invocaciones de CLI de un solo uso. Los tres encaminan por defecto hacia un receptor en memoria (`RecordingSink`, no un controlador real ni una instancia real de HYDRA-UMC-TWIN), o hacia un `SimulatedTransport` que puede fallar de verdad (timeout/desconexión) cuando se pasan los flags de transporte de arriba - todavía no hay transporte gRPC/WebSocket. Ver [`CHANGELOG.md`](CHANGELOG.md) para lo entregado exactamente, [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) para cada comando/endpoint, y la Hoja de Ruta abajo para lo que sigue por delante.
 
----
+## 🔒 Seguridad y protección
 
-## 2. 🔄 FLUJO DE SINCRONIZACIÓN HIL
+| Amenaza | Defensa | Dónde |
+|---|---|---|
+| Mover una articulación contra una colisión | Una orden en modo real necesita un certificado de enclavamiento ed25519 firmado por el gemelo (dominio `hydra-umc-interlock-certificate-v1`), de 2000 ms como máximo (`--certificate-max-age-ms`), con un futuro de 1000 ms como máximo, nunca repetido (se recuerdan 8192 nonces) y con una holgura de al menos 0,05 m | `certificate.rs`, `interlock.rs` |
+| Una orden sin certificado, sin fecha o con una validez enorme | Sin `--twin-public-key-file` (o `HYDRA_UMC_HIL_BRIDGE_TWIN_KEY_FILE`) en modo real se bloquean todas las órdenes; `--allow-unsigned-risk` es el ajuste de banco; las órdenes sin fecha necesitan `--allow-undated-commands` y la validez se limita con `--max-valid-for-ms` | `main.rs` |
+| Una articulación desconocida o fuera de rango, y un enlace perdido | `--urdf` (o `HYDRA_UMC_HIL_BRIDGE_URDF`) define las articulaciones y sus rangos, y sin él no hay comprobación de rango; un vigilante (ciclo de 50 ms) para la articulación al vencer su concesión aunque los hilos de trabajo estén ocupados | `limits.rs`, `server.rs`, `watchdog.rs` |
+| Acceso anónimo, cuerpos grandes, peticiones lentas | Un token Bearer de 16 caracteres como mínimo (`HYDRA_UMC_HIL_BRIDGE_TOKEN` o `--token-file`); un cuerpo mide como máximo 16 KiB (`413`), 8 trabajadores por defecto (`--workers`, de 1 a 256); cada decisión entra en un anillo de 200 entradas de auditoría (`--audit-log` guarda un fichero) | `access.rs`, `server.rs`, `audit.rs` |
 
-La división por modo en `BRIDGE` y la compuerta del enclavamiento de
-seguridad en la ruta `Modo Real` son reales hoy (`bridge.rs`/
-`interlock.rs`), encaminando hacia un receptor en memoria en vez de un
-proceso real en vivo. Todo lo que toca un proceso real `APP`, `TWIN` o
-`CORE` mediante una conexión real sigue siendo trabajo futuro.
+**Lo que nunca hace:** nunca mueve una articulación en modo real sin un certificado firmado y reciente, y todavía no ha movido un robot real.
 
-```mermaid
-flowchart LR
-    APP["Interfaz de Control - planeado"] --> BRIDGE["HIL-BRIDGE - encaminamiento real v0"]
-    BRIDGE -- Modo Simulación --> TWIN["HYDRA-UMC-TWIN - planeado"]
-    BRIDGE -- "Modo Real (con enclavamiento - real v0)" --> CORE["Núcleo HYDRA-UMC (STM32) - planeado"]
-    CORE -- Feedback --> BRIDGE
-    TWIN -- Feedback --> BRIDGE
-    BRIDGE --> APP
+## 🔌 Interfaces
+
+Una API HTTP en `127.0.0.1:8113` y una línea de órdenes, ambas con la misma lógica de decisión. El `Content-Type` es obligatorio (si no, `415`). La referencia completa es `docs/CLI_REFERENCE.md`.
+
+| Topic o ruta | Qué lleva |
+|---|---|
+| `POST /route` | decidir una orden para una articulación (real o simulada) |
+| `POST /mirror` | reflejar una posición entre el lado real y el virtual |
+| `GET /stats`, `GET /audit` | contadores y el anillo de decisiones recientes |
+| `serve` | `serve [--addr 127.0.0.1] [--port 8113] [--workers N] [--token-file FICHERO]`; la línea de órdenes de un solo uso admite `--joint --position --mode --collision-risk --distance --clear-distance` |
+
+## ⚙️ Configuración
+
+| Variable | Por defecto | Qué fija |
+|---|---|---|
+| `HYDRA_UMC_HIL_BRIDGE_TOKEN`, `--token-file` | sin token | el token Bearer, de 16 caracteres como mínimo |
+| `HYDRA_UMC_HIL_BRIDGE_TWIN_KEY_FILE`, `--twin-public-key-file` | sin definir | la clave pública del gemelo; sin ella el modo real bloquea todas las órdenes |
+| `HYDRA_UMC_HIL_BRIDGE_ALLOW_UNSIGNED_RISK` | `0` | `1` acepta órdenes sin certificado (solo en banco) |
+| `HYDRA_UMC_HIL_BRIDGE_ALLOW_UNDATED_COMMANDS`, `--max-valid-for-ms` | desactivado | aceptar órdenes sin fecha; tope de cuánto vale una orden |
+| `HYDRA_UMC_HIL_BRIDGE_URDF`, `--urdf` | sin definir | el URDF cuyas articulaciones y rangos se comprueban |
+| `HYDRA_UMC_HIL_BRIDGE_AUDIT_LOG`, `--audit-log` | solo el anillo | guardar también las entradas de auditoría en este fichero |
+| `--certificate-max-age-ms`, `--workers` | `2000`, `8` | edad máxima de un certificado; hilos de trabajo (1 a 256) |
+
+## 🚀 Inicio rápido
+
+Requiere una cadena de herramientas estable reciente de Rust (`cargo`); Python 3 solo hace falta para las herramientas del proyecto.
+
+```bash
+cargo test                                                    # 115 tests, no hardware
+bash run.sh        # Linux, macOS (run.bat on Windows)
+cargo run --release -- serve --port 8113 --token-file token.txt   # real mode also needs --twin-public-key-file
 ```
 
----
+## 🧪 Pruebas
 
-## 3. 🧱 ARQUITECTURA Y DECISIONES DE DISEÑO
+115 pruebas de Rust se ejecutan con `cargo test`; están dentro de los módulos de `src/`. No necesitan hardware ni red.
 
-* **Por qué este puente no tiene carpetas `hardware/`/`firmware/`/`os/`.** Software puro - conecta hardware ya existente (apps reales, firmware real de HYDRA-UMC) con el gemelo digital, sin placa propia.
-* **Por qué es hermano, no un submódulo, de HYDRA-UMC-TWIN.** Un puente hardware-in-the-loop necesita seguir funcionando (y seguir dejando fluir los comandos de un dispositivo real) con independencia de lo que esté haciendo en ese instante el propio bucle de renderizado/física de HYDRA-UMC-TWIN - un proceso separado significa que un reinicio del gemelo no descarta un comando real en curso.
-* **Cómo encaja en el resto del ecosistema.** Permite que HYDRA-UMC-SUITE, HYDRA-UMC-ANDROID-CONTROL y HYDRA-UMC-IOS-CONTROL controlen HYDRA-UMC-TWIN como si fuera una célula real respaldada por HYDRA-UMC-SERVER - la misma superficie de control, un objetivo simulado.
-* **Por qué el interbloqueo confía en el propio indicador `collision_imminent` del gemelo, y aun así añade una holgura mínima y falla en cerrado.** El gemelo ya ha hecho el razonamiento geométrico/físico real cuando informa del riesgo, así que el puente no vuelve a derivar colisiones; pero un gemelo que dice "sin colisión" a un milímetro, una distancia NaN o la ausencia de informe no son una afirmación de que el camino esté libre, así que bloquean el comando (`MIN_CLEARANCE_M` = 5 cm, un suelo conservador y no una distancia certificada: eso es del firmware). Mira la documentación del módulo `interlock.rs` para ver cómo refleja la frontera detectar-vs-imponer de HYDRA-UMC-SAFETY-ZONES.
-* **Por qué el modo `Simulation` nunca está sujeto al enclavamiento.** Todo el sentido de encaminar un comando hacia el gemelo en vez de hardware real es poder ver una colisión predicha desarrollarse de forma segura - bloquearla ahí anularía la propia función que existe para respaldar.
-* **Por qué `CommandSink` es un trait con solo una implementación en memoria `RecordingSink` hoy.** Todavía no existe ningún transporte gRPC/WebSocket real (ver el propio comentario de `Cargo.toml`) - `RecordingSink` es honesto al respecto: registra lo que se le pidió enviar sin transmitir a ningún sitio, el mismo razonamiento que `NullEStopRequester` en HYDRA-UMC-SAFETY-ZONES.
-* **Por qué `CommandSink::send()` devuelve un `Result` en vez de `()`.** Un transporte real puede fallar en la entrega (timeout, desconexión) con independencia de si el enclavamiento permitió el comando - si `send()` no puede fallar, el puente no tiene forma de evitar afirmar éxito ante un comando que nunca llegó de verdad. `SimulatedTransport` existe justamente para que ese camino de fallo sea real y testeable hoy, sin esperar a que exista un transporte real.
-* **Por qué `TransportFailure` es un `RouteOutcome` separado de `BlockedByInterlock`.** Son dos tipos distintos de "no ocurrió": uno es un rechazo deliberado de seguridad (el enclavamiento decidió no reenviarlo), el otro es una entrega de mejor esfuerzo que simplemente no se completó. Fusionarlos en un fallo genérico ocultaría qué capa de seguridad detuvo realmente el comando - útil para depurar y para cualquier política futura que los trate de forma distinta (reintentar un fallo de transporte es razonable; reintentar tras un bloqueo del enclavamiento no lo es).
+El CI ejecuta `HYDRA_UMC_CI=1 python tools/ci_validate.py`, que comprueba el manifiesto, los documentos, los ocho README y las imágenes.
 
----
-
-## 📂 ESTRUCTURA DE DIRECTORIOS
-
-Puente puramente software, sin diseño de hardware propio; por eso este
-proyecto no lleva carpetas `hardware/`, `firmware/` ni `os/`, conforme a la política de estructura del repositorio.
-
-```text
-HYDRA-UMC-HIL-BRIDGE/
-├── src/
-│   ├── protocol.rs       # Tipos reales JointCommand/Mode
-│   ├── interlock.rs      # Decisión real de enclavamiento de seguridad
-│   ├── bridge.rs         # Encaminamiento real basado en modo + mirroring + CommandSink/SimulatedTransport
-│   ├── certificate.rs    # Verifica el certificado de riesgo Ed25519 del gemelo: ligado al comando, vigencia, un solo uso
-│   ├── audit.rs          # Quién envió cada orden real: líneas JSON antes de decidirla, últimos registros en memoria
-│   ├── server.rs         # Superficie JSON/HTTP plana (tiny_http, bloqueante, sin runtime async)
-│   ├── main.rs           # Entry point + subcomandos reales `route`/`mirror`
-│   ├── access.rs         # Token Bearer opcional para la API HTTP (no hace falta en loopback, obligatorio fuera de él)
-│   ├── limits.rs         # Los límites de las articulaciones del robot, leídos de su URDF
-│   └── watchdog.rs       # El vigilante, del lado del consumidor, de las órdenes reales (cada orden solo vale un tiempo corto)
-├── docs/                # Documentación y guías de integración
-├── images/              # Medios y diagramas
-├── systemd/
-│   └── hydra-umc-hil-bridge.service # Unidad systemd de la API local de route/mirror en la CM5
-├── tools/
-│   ├── build_test.py    # Comprobación de compilación sin versionado
-│   ├── ci_validate.py   # Validación de manifiesto/CHANGELOG/docs usada por CI
-│   ├── _doc_policy.py   # Reglas de documentación compartidas por la familia (copia de la de HYDRA-UMC-SDK, mantenida en sincronía)
-│   ├── _readme_parity.py # Comprobación de que los ocho README comparten estructura (copia de la de HYDRA-UMC-SDK, mantenida en sincronía)
-│   └── hydra_project_tool.py # Los mismos comandos en todos los repositorios: validate, test, ci, version, status, bump
-├── Cargo.toml           # Metadatos del paquete, dependencias, version cuentakilometros
-├── bump_version.py      # Incremento de versión tipo cuentakilómetros (solo lo ejecuta el comando `bump` explícito)
-├── bump_manifest_version.py # Sincroniza la versión de hydra-umc.project.json con la nativa (--sync)
-├── build.sh / build.bat # Valida y compila (compilar nunca cambia la versión)
-├── build-test.sh / build-test.bat # Comprobación de compilación sin versionado
-└── run.sh / run.bat     # Ejecuta el binario release compilado (reenvía argumentos)
-```
-
----
-
-## 🏗️ BUILD Y RUN
+## 🏗️ Compilación y publicación
 
 Requiere el toolchain de Rust (`cargo`/`rustc`, instalar vía [rustup](https://rustup.rs)) y Python 3.10+ (solo para `bump_version.py`).
 
@@ -197,17 +230,65 @@ Ver [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) para el contrato completo d
 
 `Cargo.toml` no lleva crates externos todavía a propósito, más allá de `tiny_http`/`serde`/`serde_json` (la interfaz HTTP JSON real) - ver el comentario dentro del archivo para lo que se añade cuando empiece el trabajo real de transporte gRPC/WebSocket.
 
----
+## 🩺 Resolución de problemas
 
-## 🚀 HOJA DE RUTA
+| Ves | Porque | Haz |
+|---|---|---|
+| every command is blocked in real mode | No se dio la clave pública del gemelo | Da `--twin-public-key-file`; solo en banco, `--allow-unsigned-risk` |
+| a certificate is refused | Tiene más de 2000 ms, está demasiado en el futuro, se repite o deja menos de 0,05 m de holgura | Haz que el gemelo firme uno nuevo para cada orden y mantén cerca los relojes de ambos lados |
+| `415`, `413` | Falta el `Content-Type` o el cuerpo supera 16 KiB | Envía `Content-Type: application/json` y un cuerpo más pequeño |
+
+## 📂 Estructura del repositorio
+
+<p align="center">
+  <img src="images/repository-structure.svg" alt="Repository structure of HYDRA-UMC-HIL-BRIDGE" width="100%">
+</p>
+
+<details>
+<summary>Versión en texto del árbol</summary>
+
+```text
+HYDRA-UMC-HIL-BRIDGE/
+├── src/
+│   ├── bridge.rs                                decisiones de ruta y espejo
+│   ├── certificate.rs                           el certificado de enclavamiento firmado (ed25519)
+│   ├── interlock.rs limits.rs                   reglas de enclavamiento y límites de articulación URDF
+│   ├── server.rs                                la API HTTP, trabajadores y el hilo vigilante
+│   ├── watchdog.rs                              para una articulación al vencer su concesión
+│   ├── access.rs audit.rs                       token Bearer y el anillo de auditoría
+│   └── protocol.rs main.rs                      formas de mensaje, CLI y arranque
+├── docs/                                        la referencia de la línea de órdenes y el certificado de enclavamiento
+├── systemd/                                     unidad de servicio para la CM5
+├── tools/                                       ejecutor de compilación y pruebas, subida de versión, validador de CI, generadores y comprobaciones de README e imágenes
+├── images/                                      banner y las imágenes del README
+├── .github/                                     flujo de CI y plantillas de incidencias
+├── hydra-umc.project.json                       manifiesto: versión, madurez, familia
+├── CHANGELOG.md                                 qué cambió en cada versión
+├── build.sh build.bat                           scripts de compilación (nunca cambian la versión)
+├── build-test.sh build-test.bat                 scripts de compilación (nunca cambian la versión)
+├── test.sh test.bat                             ejecutan las pruebas
+├── Cargo.toml / Cargo.lock                      paquete de Rust y dependencias fijadas
+├── bump_version.py / bump_manifest_version.py   subida de versión explícita
+├── run.sh run.bat                               arrancar el servicio
+└── SECURITY.md SUPPORT.md CONTRIBUTING.md CODE_OF_CONDUCT.md LICENSE LICENSE.md
+```
+
+</details>
+
+## 🗺️ Hoja de ruta y límites conocidos
+
+**Límites conocidos hoy**
+
 * **Fase 1:** Sincronización de Digital Twin con telemetría de hardware en tiempo real y latencia sub-10ms.
 * **Fase 2:** Integración de Physics Replica con simuladores de grado industrial (Isaac Sim) y soporte para cuerpos deformables.
 * **Fase 3:** Patrones de recuperación automatizados de Node Healing para failover descentralizado y detección temprana de degradación de sensores.
 * **Fase 4:** Sincronización HIL multi-controlador (Swarm HIL) y soporte para generación de datos sintéticos fotorrealistas.
 
----
+## 🌍 Idiomas
 
-## 🔗 Proyectos Relacionados
+Este README y los documentos del repositorio existen en ocho idiomas: inglés, español, alemán, francés, italiano, japonés, chino y portugués (Portugal). Se escriben a la vez y el CI comprueba que los ocho ficheros tengan las mismas secciones y los mismos enlaces. Este repositorio no tiene pantalla ni catálogo de mensajes propios, así que no hay cadenas de interfaz que traducir.
+
+## 🔗 Proyectos relacionados
 
 Este proyecto es parte del ecosistema de robótica HYDRA-UMC del mismo autor (JuanenRac / Electro Hobby 3D). Vale la pena conocerlo, ya que una petición podría en realidad ser sobre alguno de estos en vez de sobre este repositorio.
 
@@ -298,22 +379,28 @@ Este proyecto es parte del ecosistema de robótica HYDRA-UMC del mismo autor (Ju
 - **[HYDRA-UMC-OPS-AGENT](https://github.com/JuanenRac/HYDRA-UMC-OPS-AGENT)** — coordinador de incidencias de mantenimiento: un rol edge de bajo privilegio recopila un snapshot de inventario/salud saneado, un rol control-plane lo renderiza de solo lectura y pide a un proveedor de IA que sugiera un diagnóstico - nunca aplica un parche ni despliega nada.
 - **[HYDRA-UMC-DEV-SERVER](https://github.com/JuanenRac/HYDRA-UMC-DEV-SERVER)** — host de desarrollo reproducible (Raspberry Pi 5 / CM5) que almacena el código del ecosistema y ejecuta tareas acotadas de compilación/pruebas bajo una cola duradera; un rol de desarrollo dedicado, explícitamente distinto de un CM5 operativo.
 
+## 📚 Documentación
 
----
+Dónde leer más:
 
-## 📚 Documentación y Comunidad
+* [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md) - cada opción de la línea de órdenes, las rutas HTTP y sus errores
+* [docs/INTERLOCK_CERTIFICATE.md](docs/INTERLOCK_CERTIFICATE.md) - qué dice el certificado de enclavamiento firmado y cómo se comprueba
+* [Base de seguridad del ecosistema](https://github.com/JuanenRac/HYDRA-UMC-DOCS/blob/main/docs/SECURITY_BASELINE.md)
+* [Modelo de amenazas del ecosistema](https://github.com/JuanenRac/HYDRA-UMC-DOCS/blob/main/docs/THREAT_MODEL.md)
+* [Historial de cambios de este repositorio](CHANGELOG.md)
+* [Licencia de este repositorio](LICENSE.md)
 
-- **[docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md)** — cada invocación de `route`/`mirror`/`serve`, salida real capturada de un binario release compilado, la tabla de códigos de salida, y el contrato HTTP JSON de `POST /route`/`POST /mirror`/`GET /stats`.
-- **[CONTRIBUTING.md](CONTRIBUTING.md)** — stack tecnológico y pautas de codificación para un pull request.
-- **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)** — los estándares de comportamiento esperados en esta comunidad.
-- **[SECURITY.md](SECURITY.md)** — cómo reportar una vulnerabilidad, y las áreas reales de enfoque en seguridad de este proyecto.
-- **[SUPPORT.md](SUPPORT.md)** — dónde hacer preguntas y reportar errores.
-- **[LICENSE.md](LICENSE.md)** — la licencia propia de este proyecto.
+## 🤝 Contribuir y comunidad
+
+* Antes de un pull request ejecuta `HYDRA_UMC_CI=1 py -3 tools/ci_validate.py` (o `HYDRA_UMC_CI=1 python3 tools/ci_validate.py`): debe imprimir `CI_VALIDATION=PASS`. No ejecutes `build.sh` ni `build.bat` para esta comprobación; compilar no es comprobar.
+* Los ocho README se escriben desde una sola fuente en HYDRA-UMC-DOCS; no los edites a mano. Cambia la fuente y vuelve a escribirlos con `tools/make_readmes.py`.
+* No afirmes en un README lo que no se ha ejecutado: di «simulado» o «sin probar en hardware» cuando esa sea la verdad.
+* Mira [CONTRIBUTING.md](CONTRIBUTING.md), el [código de conducta](CODE_OF_CONDUCT.md), [SECURITY.md](SECURITY.md) y [SUPPORT.md](SUPPORT.md).
 
 ## 👤 AUTOR
-**JuanenRac** (Electro Hobby 3D)
-📧 electrohobby3d@gmail.com
-📺 [youtube.com/@electrohobby3d](https://youtube.com/@electrohobby3d)
+
+**JuanenRac (Electro Hobby 3D)** · electrohobby3d@gmail.com
 
 ## 📜 LICENCIA
-GPL-3.0-or-later - Ver archivo LICENSE para más detalles.
+
+GPL-3.0-or-later - [LICENSE](LICENSE).

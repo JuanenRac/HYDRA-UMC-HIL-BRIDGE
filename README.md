@@ -1,8 +1,14 @@
+<!-- =============================================================================
+HYDRA-UMC-HIL-BRIDGE - Hardware-in-the-loop bridge
+Copyright (C) JuanenRac (Electro Hobby 3D) <electrohobby3d@gmail.com>
+GPL-3.0-or-later - see LICENSE
+============================================================================= -->
+
 <p align="center">
   <img src="images/HYDRA_UMC_BANNER.svg" alt="HYDRA-UMC-HIL-BRIDGE banner" width="100%">
 </p>
 
-# 🌉 HYDRA-UMC-HIL-BRIDGE
+# 🔁 HYDRA-UMC-HIL-BRIDGE
 
 <p align="center">🇺🇸 <b>English</b> | <a href="README_spa.md">🇪🇸 Español</a> | <a href="README_fra.md">🇫🇷 Français</a> | <a href="README_ita.md">🇮🇹 Italiano</a> | <a href="README_deu.md">🇩🇪 Deutsch</a> | <a href="README_zho.md">🇨🇳 简体中文</a> | <a href="README_jpn.md">🇯🇵 日本語</a> | <a href="README_por.md">🇵🇹 Português</a></p>
 
@@ -10,14 +16,18 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/License-GPL%203.0--or--later-blue.svg" alt="GPL 3.0 or later">
-  <img src="https://img.shields.io/badge/Protocol-WebSocket%20%2F%20gRPC-yellow.svg" alt="Protocol">
-  <img src="https://img.shields.io/badge/Feature-Zero--Latency%20Sync-green.svg" alt="Sync">
-  <img src="https://img.shields.io/badge/Stage-Functional%20v0-yellow.svg" alt="Functional v0 stage">
+  <img src="https://img.shields.io/badge/Rust-2021-DEA584.svg" alt="Rust">
+  <img src="https://img.shields.io/badge/Safety-Interlock-gated-red.svg" alt="Safety">
+  <img src="https://img.shields.io/badge/Tests-115%20passing-2ea44f.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Version-0.1.0-0f6cbd.svg" alt="Version">
+  <img src="https://img.shields.io/badge/Maturity-functional-0F6CBD.svg" alt="Maturity">
 </p>
 
 ---
 
 > **Safety and security status:** this ecosystem is not a certified safety system. There is no hardware E-STOP path, no firmware-enforced limits or interlocks and no verified motion command yet; firmware images are checked with CRC32 and a shared-key HMAC-SHA256, not with an asymmetric signature; TLS and mutual TLS are optional and off by default; no custom board has been populated or tested yet. Read the [security baseline](https://github.com/JuanenRac/HYDRA-UMC-DOCS/blob/main/docs/SECURITY_BASELINE.md) and the [threat model](https://github.com/JuanenRac/HYDRA-UMC-DOCS/blob/main/docs/THREAT_MODEL.md) before relying on any statement here for the safety of a person.
+
+---
 
 ## 📋 At a glance
 
@@ -25,9 +35,12 @@
 |---|---|
 | Version | `0.1.0` |
 | Maturity | Functional |
+| Tests | 115 (`cargo test`) |
 | Stack | Rust / hardware-in-the-loop I/O |
 | Target | The Raspberry Pi CM5 of a HYDRA-UMC cell |
 | On real hardware | Simulated only: tested against emulators, fakes or simulators; no run on real hardware is recorded for this version |
+
+**Jump to:** [Overview](#-overview) · [Architecture](#-architecture) · [Features](#-features) · [Security & Safety](#-security--safety) · [Interfaces](#-interfaces) · [Configuration](#-configuration) · [Quick start](#-quick-start) · [Testing](#-testing) · [Troubleshooting](#-troubleshooting) · [Repository Structure](#-repository-structure) · [Related Projects](#-related-projects)
 
 ## 🚦 Project status
 
@@ -38,17 +51,60 @@ Each line is one part of this repository and the light says how far it is today.
 | Area | State | What it means here |
 |---|---|---|
 | Software | 🟡 | Works for its main purpose; the honesty check above lists what is still missing |
-| Tests | 🟠 | No test count is recorded for this repository yet |
+| Tests | 🟢 | 115 automated tests, run on every change |
 | Real hardware | 🟠 | Simulated only: tested against emulators, fakes or simulators; no run on real hardware is recorded for this version |
 | Documentation | 🟢 | README in eight languages, checked against the manifest on every change |
 
-## 1. 🛠️ TECHNICAL OVERVIEW
+## 🎯 Overview
 
 **HYDRA-UMC-HIL-BRIDGE** is the communication artery meant to enable Hardware-in-the-Loop (HIL) functionality. It routes commands between the physical controllers and the Digital Twin engine and mirrors state between them; no real controller has been connected to it yet.
 
 It allows developers to send commands from any interface (App, Suite, Studio) to the simulator as if it were a physical robot, and conversely, it can mirror a physical robot's movements into the virtual world for remote supervision and digital twin shadowing.
 
-### Key Features:
+## 🧩 Role in HYDRA-UMC
+
+**HYDRA-UMC-HIL-BRIDGE** sits between a control interface and a robot that may be real or simulated. In real mode a command moves a joint only when the digital twin has signed a fresh interlock certificate for it; in simulation mode the bridge mirrors the position instead. It decides; the transports to the real controller and to the twin are still to come.
+
+## 🏛️ Architecture
+
+The mode-based split at `BRIDGE` and the safety interlock gate on the
+`Real Mode` path are real today (`bridge.rs`/`interlock.rs`), routing to
+an in-memory sink rather than a live process. Everything touching a real
+`APP`, `TWIN` or `CORE` process over a real connection remains future
+work.
+
+<p align="center">
+  <img src="images/architecture.svg" alt="HYDRA-UMC-HIL-BRIDGE architecture" width="100%">
+</p>
+
+<details>
+<summary>Text version of the diagram (Mermaid)</summary>
+
+```mermaid
+flowchart LR
+    APP["Control Interface - planned"] --> BRIDGE["HIL-BRIDGE - real v0 routing"]
+    BRIDGE -- Simulation Mode --> TWIN["HYDRA-UMC-TWIN - planned"]
+    BRIDGE -- "Real Mode (interlock-gated - real v0)" --> CORE["HYDRA-UMC Core (STM32) - planned"]
+    CORE -- Feedback --> BRIDGE
+    TWIN -- Feedback --> BRIDGE
+    BRIDGE --> APP
+```
+
+</details>
+
+**Why it is built this way**
+
+* **Why this bridge has no `hardware/`/`firmware/`/`os/` folders.** Pure software - it bridges existing hardware (real apps, real HYDRA-UMC firmware) to the digital twin, no board of its own.
+* **Why it's a sibling, not a submodule, of HYDRA-UMC-TWIN.** A hardware-in-the-loop bridge needs to keep running (and keep a real device's commands flowing) independent of whatever HYDRA-UMC-TWIN's own render/physics loop is doing at that instant - a separate process means a twin restart doesn't drop an in-flight real command.
+* **How this fits the rest of the ecosystem.** Lets HYDRA-UMC-SUITE, HYDRA-UMC-ANDROID-CONTROL and HYDRA-UMC-IOS-CONTROL control HYDRA-UMC-TWIN as if it were a real HYDRA-UMC-SERVER-backed cell - the same control surface, a simulated target.
+* **Why the interlock trusts the twin's own `collision_imminent` flag, and still adds a minimum clearance and fails closed.** The twin has already done the real geometric/physics reasoning by the time it reports risk, so the bridge does not re-derive collisions; but a twin that says "no collision" at one millimetre, a NaN distance, or no report at all is not a statement that the path is clear, so those block the command (`MIN_CLEARANCE_M` = 5 cm, a conservative floor and not a certified distance: the firmware owns that). See `interlock.rs`'s own module docs for how this mirrors HYDRA-UMC-SAFETY-ZONES's detect-vs-enforce boundary.
+* **Why `Simulation` mode is never gated by the interlock.** The entire point of routing a command to the twin instead of real hardware is to be able to see a predicted collision play out safely - blocking it there would defeat the feature it exists to support.
+* **Why `CommandSink` is a trait with only an in-memory `RecordingSink` implementation today.** No real gRPC/WebSocket transport exists yet (see `Cargo.toml`'s own comment) - `RecordingSink` is honest about that: it records what it was asked to send without transmitting anywhere, the same reasoning as `NullEStopRequester` in HYDRA-UMC-SAFETY-ZONES.
+* **Why `CommandSink::send()` returns a `Result` instead of `()`.** A real transport can fail to deliver (timeout, disconnect) independently of whether the interlock allowed the command through - if `send()` can't fail, the bridge has no way to avoid claiming success on a command that never actually arrived. `SimulatedTransport` exists specifically so that failure path is real and testable today, without waiting for a real transport to exist.
+* **Why `TransportFailure` is a separate `RouteOutcome` from `BlockedByInterlock`.** They are different kinds of "didn't happen": one is a deliberate safety refusal (the interlock decided not to forward it), the other is best-effort delivery that simply didn't complete. Collapsing them into one generic failure would hide which safety layer actually stopped the command - useful for debugging and for any future policy that treats them differently (e.g. retrying a transport failure is reasonable; retrying past an interlock block is not).
+
+## ✨ Features
+
 * 🔑 **Optional Bearer token:** on loopback the API needs no token; away from loopback `serve` refuses to start without one (`--token-file` or `HYDRA_UMC_HIL_BRIDGE_TOKEN`). With a token set, every request must send `Authorization: Bearer <token>` (constant-time comparison); only `GET /stats`, the health path of the manifest, stays open. *(implemented)*
 * 🛡️ **Safety Interlock (v0):** the real `route` subcommand blocks a real-hardware-bound command whenever a twin risk report says a collision is imminent - see "Honesty check" below for exactly what runs today.
 * 🧯 **The interlock fails closed (v0):** in `real` mode a command is forwarded only with a twin risk report that says the path is clear: no report blocks it (omitting it used to default to "no collision", which was enough to reach the hardware), a NaN distance blocks it, and so does less than 5 cm of clearance even when the twin did not raise `collision_imminent` (`MIN_CLEARANCE_M`). `--clear-distance METERS` supplies a clear report to the CLI; request bodies over 16 KB are refused with `413`. A report that the caller sends in the same request is still the caller's word until the twin transport exists. *(implemented)*
@@ -63,80 +119,57 @@ It allows developers to send commands from any interface (App, Suite, Studio) to
 
 **Honesty check - what actually runs today:** `route --mode real|simulation --joint NAME --position VALUE [--collision-risk] [--distance METERS] [--transport-latency-ms MS] [--transport-timeout-ms MS] [--transport-disconnected]` makes a real routing decision - `simulation` mode always sends, `real` mode is gated by a real safety interlock that blocks the command when there is no twin risk report, when `--collision-risk` is set, when the distance is NaN or when there is less than 5 cm of clearance (`--clear-distance METERS` supplies a clear report). `mirror --joint NAME --position VALUE` shadows a command unconditionally. `serve` exposes both over real HTTP JSON instead of one-shot CLI invocations. All three route to an in-memory sink by default (`RecordingSink`, not a real controller or a real HYDRA-UMC-TWIN instance), or to a `SimulatedTransport` that can genuinely fail (timeout/disconnect) when the transport flags above are passed - there is no gRPC/WebSocket transport yet. See [`CHANGELOG.md`](CHANGELOG.md) for exactly what shipped, [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) for every command/endpoint, and the Roadmap below for what's still ahead.
 
----
+## 🔒 Security & Safety
 
-## 2. 🔄 HIL SYNC FLOW
+| Threat | Defence | Where |
+|---|---|---|
+| Moving a joint into a collision | A real-mode command needs an ed25519 interlock certificate signed by the twin (domain `hydra-umc-interlock-certificate-v1`), at most 2000 ms old (`--certificate-max-age-ms`), at most 1000 ms in the future, never replayed (8192 nonces remembered) and with a clearance of at least 0.05 m | `certificate.rs`, `interlock.rs` |
+| A command with no certificate, no date or an enormous validity | Without `--twin-public-key-file` (or `HYDRA_UMC_HIL_BRIDGE_TWIN_KEY_FILE`) in real mode every command is blocked; `--allow-unsigned-risk` is the bench setting; undated commands need `--allow-undated-commands` and the validity is capped by `--max-valid-for-ms` | `main.rs` |
+| An unknown or out-of-range joint, and a lost link | `--urdf` (or `HYDRA_UMC_HIL_BRIDGE_URDF`) defines the joints and their ranges, and without it there is no range check; a watchdog (50 ms tick) stops the joint when its lease expires even when the worker threads are busy | `limits.rs`, `server.rs`, `watchdog.rs` |
+| Anonymous access, big bodies, slow requests | A Bearer token of at least 16 characters (`HYDRA_UMC_HIL_BRIDGE_TOKEN` or `--token-file`); a body is at most 16 KiB (`413`), 8 workers by default (`--workers`, 1 to 256); every decision goes into a ring of 200 audit entries (`--audit-log` keeps a file) | `access.rs`, `server.rs`, `audit.rs` |
 
-The mode-based split at `BRIDGE` and the safety interlock gate on the
-`Real Mode` path are real today (`bridge.rs`/`interlock.rs`), routing to
-an in-memory sink rather than a live process. Everything touching a real
-`APP`, `TWIN` or `CORE` process over a real connection remains future
-work.
+**What it never does:** it never moves a joint in real mode without a fresh signed certificate, and it has not yet driven a real robot.
 
-```mermaid
-flowchart LR
-    APP["Control Interface - planned"] --> BRIDGE["HIL-BRIDGE - real v0 routing"]
-    BRIDGE -- Simulation Mode --> TWIN["HYDRA-UMC-TWIN - planned"]
-    BRIDGE -- "Real Mode (interlock-gated - real v0)" --> CORE["HYDRA-UMC Core (STM32) - planned"]
-    CORE -- Feedback --> BRIDGE
-    TWIN -- Feedback --> BRIDGE
-    BRIDGE --> APP
+## 🔌 Interfaces
+
+An HTTP API on `127.0.0.1:8113` and a command line, both reaching the same decision logic. The `Content-Type` is required (`415` otherwise). The full reference is `docs/CLI_REFERENCE.md`.
+
+| Topic or route | What it carries |
+|---|---|
+| `POST /route` | decide a command for a joint (real or simulated) |
+| `POST /mirror` | mirror a position between the real and the virtual side |
+| `GET /stats`, `GET /audit` | counters and the ring of recent decisions |
+| `serve` | `serve [--addr 127.0.0.1] [--port 8113] [--workers N] [--token-file FILE]`; the one-shot command line takes `--joint --position --mode --collision-risk --distance --clear-distance` |
+
+## ⚙️ Configuration
+
+| Variable | Default | What it sets |
+|---|---|---|
+| `HYDRA_UMC_HIL_BRIDGE_TOKEN`, `--token-file` | no token | the Bearer token, at least 16 characters |
+| `HYDRA_UMC_HIL_BRIDGE_TWIN_KEY_FILE`, `--twin-public-key-file` | unset | the public key of the twin; without it real mode blocks every command |
+| `HYDRA_UMC_HIL_BRIDGE_ALLOW_UNSIGNED_RISK` | `0` | `1` accepts commands without a certificate (bench only) |
+| `HYDRA_UMC_HIL_BRIDGE_ALLOW_UNDATED_COMMANDS`, `--max-valid-for-ms` | off | accept commands with no date; cap on how long a command stays valid |
+| `HYDRA_UMC_HIL_BRIDGE_URDF`, `--urdf` | unset | the URDF whose joints and ranges are checked |
+| `HYDRA_UMC_HIL_BRIDGE_AUDIT_LOG`, `--audit-log` | ring only | also keep the audit entries in this file |
+| `--certificate-max-age-ms`, `--workers` | `2000`, `8` | age limit of a certificate; worker threads (1 to 256) |
+
+## 🚀 Quick start
+
+Requires a recent stable Rust toolchain (`cargo`); Python 3 is needed only for the project tools.
+
+```bash
+cargo test                                                    # 115 tests, no hardware
+bash run.sh        # Linux, macOS (run.bat on Windows)
+cargo run --release -- serve --port 8113 --token-file token.txt   # real mode also needs --twin-public-key-file
 ```
 
----
+## 🧪 Testing
 
-## 3. 🧱 ARCHITECTURE & DESIGN DECISIONS
+115 Rust tests run with `cargo test`; they sit inside the modules of `src/`. They need no hardware and no network.
 
-* **Why this bridge has no `hardware/`/`firmware/`/`os/` folders.** Pure software - it bridges existing hardware (real apps, real HYDRA-UMC firmware) to the digital twin, no board of its own.
-* **Why it's a sibling, not a submodule, of HYDRA-UMC-TWIN.** A hardware-in-the-loop bridge needs to keep running (and keep a real device's commands flowing) independent of whatever HYDRA-UMC-TWIN's own render/physics loop is doing at that instant - a separate process means a twin restart doesn't drop an in-flight real command.
-* **How this fits the rest of the ecosystem.** Lets HYDRA-UMC-SUITE, HYDRA-UMC-ANDROID-CONTROL and HYDRA-UMC-IOS-CONTROL control HYDRA-UMC-TWIN as if it were a real HYDRA-UMC-SERVER-backed cell - the same control surface, a simulated target.
-* **Why the interlock trusts the twin's own `collision_imminent` flag, and still adds a minimum clearance and fails closed.** The twin has already done the real geometric/physics reasoning by the time it reports risk, so the bridge does not re-derive collisions; but a twin that says "no collision" at one millimetre, a NaN distance, or no report at all is not a statement that the path is clear, so those block the command (`MIN_CLEARANCE_M` = 5 cm, a conservative floor and not a certified distance: the firmware owns that). See `interlock.rs`'s own module docs for how this mirrors HYDRA-UMC-SAFETY-ZONES's detect-vs-enforce boundary.
-* **Why `Simulation` mode is never gated by the interlock.** The entire point of routing a command to the twin instead of real hardware is to be able to see a predicted collision play out safely - blocking it there would defeat the feature it exists to support.
-* **Why `CommandSink` is a trait with only an in-memory `RecordingSink` implementation today.** No real gRPC/WebSocket transport exists yet (see `Cargo.toml`'s own comment) - `RecordingSink` is honest about that: it records what it was asked to send without transmitting anywhere, the same reasoning as `NullEStopRequester` in HYDRA-UMC-SAFETY-ZONES.
-* **Why `CommandSink::send()` returns a `Result` instead of `()`.** A real transport can fail to deliver (timeout, disconnect) independently of whether the interlock allowed the command through - if `send()` can't fail, the bridge has no way to avoid claiming success on a command that never actually arrived. `SimulatedTransport` exists specifically so that failure path is real and testable today, without waiting for a real transport to exist.
-* **Why `TransportFailure` is a separate `RouteOutcome` from `BlockedByInterlock`.** They are different kinds of "didn't happen": one is a deliberate safety refusal (the interlock decided not to forward it), the other is best-effort delivery that simply didn't complete. Collapsing them into one generic failure would hide which safety layer actually stopped the command - useful for debugging and for any future policy that treats them differently (e.g. retrying a transport failure is reasonable; retrying past an interlock block is not).
+The CI runs `HYDRA_UMC_CI=1 python tools/ci_validate.py`, which checks the manifest, the documents, the eight READMEs and the pictures.
 
----
-
-## 📂 DIRECTORY STRUCTURE
-
-Pure software bridge with no hardware design of its own, so this project has
-no `hardware/`, `firmware/` or `os/` folders under the repository structure policy.
-
-```text
-HYDRA-UMC-HIL-BRIDGE/
-├── src/
-│   ├── protocol.rs       # Real JointCommand/Mode types
-│   ├── interlock.rs      # Real safety interlock decision
-│   ├── bridge.rs         # Real mode-based routing + mirroring + CommandSink/SimulatedTransport
-│   ├── certificate.rs    # Verifies the Ed25519 risk certificate of the twin: command binding, freshness, single use
-│   ├── audit.rs          # Who sent each real order: JSON lines before the order is decided, last records in memory
-│   ├── server.rs         # Plain JSON/HTTP surface (tiny_http, blocking, no async runtime)
-│   ├── main.rs           # Entry point + real `route`/`mirror` subcommands
-│   ├── access.rs         # Optional Bearer token for the HTTP API (none needed on loopback, mandatory away from it)
-│   ├── limits.rs         # The joint limits of the robot, read from its URDF
-│   └── watchdog.rs       # The consumer-side watchdog of the real commands (each command is only good for a short time)
-├── docs/                # Documentation and integration guides
-├── images/              # Media and diagrams
-├── systemd/
-│   └── hydra-umc-hil-bridge.service # Local CM5 route/mirror API systemd unit
-├── tools/
-│   ├── build_test.py    # Non-versioning build/compile check
-│   ├── ci_validate.py   # Manifest/CHANGELOG/docs validation used by CI
-│   ├── _doc_policy.py   # Documentation rules shared by the family (a copy of HYDRA-UMC-SDK's, kept in sync)
-│   ├── _readme_parity.py # Check that the eight READMEs share one structure (a copy of HYDRA-UMC-SDK's, kept in sync)
-│   └── hydra_project_tool.py # The same commands in every repository: validate, test, ci, version, status, bump
-├── Cargo.toml           # Package metadata, dependencies, odometer version
-├── bump_version.py      # Odometer-style version bump (run only by the explicit `bump` command)
-├── bump_manifest_version.py # Syncs hydra-umc.project.json's version to the native one (--sync)
-├── build.sh / build.bat # Validate and build (building never changes the version)
-├── build-test.sh / build-test.bat # Non-versioning build check (no CHANGELOG/version bump)
-└── run.sh / run.bat     # Runs the compiled release binary (forwards arguments)
-```
-
----
-
-## 🏗️ BUILD AND RUN GUIDE
+## 🏗️ Build & Release
 
 Requires the Rust toolchain (`cargo`/`rustc`, install via [rustup](https://rustup.rs)) and Python 3.10+ (only for `bump_version.py`).
 
@@ -197,15 +230,63 @@ See [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) for the full `POST /route`/
 
 `Cargo.toml` intentionally carries no external crates yet beyond `tiny_http`/`serde`/`serde_json` (the real HTTP JSON surface) - see the comment inside it for what else gets added once real gRPC/WebSocket transport work starts.
 
----
+## 🩺 Troubleshooting
 
-## 🚀 ROADMAP
+| You see | Because | Do |
+|---|---|---|
+| every command is blocked in real mode | No public key of the twin was given | Give `--twin-public-key-file`; on a bench only, `--allow-unsigned-risk` |
+| a certificate is refused | It is older than 2000 ms, too far in the future, replayed or leaves less than 0.05 m of clearance | Make the twin sign a new one for each command and keep the clocks of both sides close |
+| `415`, `413` | The `Content-Type` is missing or the body is over 16 KiB | Send `Content-Type: application/json` and a smaller body |
+
+## 📂 Repository Structure
+
+<p align="center">
+  <img src="images/repository-structure.svg" alt="Repository structure of HYDRA-UMC-HIL-BRIDGE" width="100%">
+</p>
+
+<details>
+<summary>Text version of the tree</summary>
+
+```text
+HYDRA-UMC-HIL-BRIDGE/
+├── src/
+│   ├── bridge.rs                                route and mirror decisions
+│   ├── certificate.rs                           the signed interlock certificate (ed25519)
+│   ├── interlock.rs limits.rs                   interlock rules and URDF joint limits
+│   ├── server.rs                                the HTTP API, workers and the watchdog thread
+│   ├── watchdog.rs                              stops a joint when its lease expires
+│   ├── access.rs audit.rs                       Bearer token and the audit ring
+│   └── protocol.rs main.rs                      message shapes, CLI and start-up
+├── docs/                                        the command-line reference and the interlock certificate
+├── systemd/                                     service unit for the CM5
+├── tools/                                       build and test runner, version bump, CI validator, README and picture generators and checks
+├── images/                                      banner and the pictures of the README
+├── .github/                                     CI workflow and issue templates
+├── hydra-umc.project.json                       manifest: version, maturity, family
+├── CHANGELOG.md                                 what changed in each version
+├── build.sh build.bat                           build scripts (they never change the version)
+├── build-test.sh build-test.bat                 build scripts (they never change the version)
+├── test.sh test.bat                             run the tests
+├── Cargo.toml / Cargo.lock                      Rust package and locked dependencies
+├── bump_version.py / bump_manifest_version.py   explicit version bump
+├── run.sh run.bat                               start the service
+└── SECURITY.md SUPPORT.md CONTRIBUTING.md CODE_OF_CONDUCT.md LICENSE LICENSE.md
+```
+
+</details>
+
+## 🗺️ Roadmap & Known limits
+
+**Known limits today**
+
 * **Phase 1:** Digital Twin synchronization with real-time hardware telemetry and sub-10ms latency.
 * **Phase 2:** Physics Replica integration with industrial-grade simulators (Isaac Sim) and deformable body support.
 * **Phase 3:** Node Healing automated recovery patterns for decentralized failover and early sensor degradation detection.
 * **Phase 4:** Multi-controller HIL synchronization (Swarm HIL) and photorealistic synthetic data generation support.
 
----
+## 🌍 Languages
+
+This README and the documents of the repository exist in eight languages: English, Spanish, German, French, Italian, Japanese, Chinese and Portuguese (Portugal). They are written together and checked in the CI so that the eight files have the same sections and the same links. This repository has no screen or message catalogue of its own, so there are no interface strings to translate.
 
 ## 🔗 Related Projects
 
@@ -298,22 +379,28 @@ This project is part of the HYDRA-UMC robotics ecosystem by the same author (Jua
 - **[HYDRA-UMC-OPS-AGENT](https://github.com/JuanenRac/HYDRA-UMC-OPS-AGENT)** — maintenance-incident coordinator: a low-privilege edge role collects a sanitized inventory/health snapshot, a control-plane role renders it read-only and asks an AI provider to suggest a diagnosis - never applies a patch or deploys anything.
 - **[HYDRA-UMC-DEV-SERVER](https://github.com/JuanenRac/HYDRA-UMC-DEV-SERVER)** — reproducible development host (Raspberry Pi 5 / CM5) that stores the ecosystem's source and runs bounded build/test tasks under a durable queue; a dedicated dev role, explicitly not an operational CM5.
 
+## 📚 Documentation
 
----
+Where to read more:
 
-## 📚 Documentation & Community
+* [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md) - every command-line option, the HTTP routes and their errors
+* [docs/INTERLOCK_CERTIFICATE.md](docs/INTERLOCK_CERTIFICATE.md) - what the signed interlock certificate says and how it is checked
+* [Security baseline of the ecosystem](https://github.com/JuanenRac/HYDRA-UMC-DOCS/blob/main/docs/SECURITY_BASELINE.md)
+* [Threat model of the ecosystem](https://github.com/JuanenRac/HYDRA-UMC-DOCS/blob/main/docs/THREAT_MODEL.md)
+* [Changelog of this repository](CHANGELOG.md)
+* [License of this repository](LICENSE.md)
 
-- **[docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md)** — every `route`/`mirror`/`serve` invocation, real output captured from a built release binary, the exit-code table, and the `POST /route`/`POST /mirror`/`GET /stats` HTTP JSON contract.
-- **[CONTRIBUTING.md](CONTRIBUTING.md)** — tech stack and coding guidelines for a pull request.
-- **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)** — the standards of behavior expected in this community.
-- **[SECURITY.md](SECURITY.md)** — how to report a vulnerability, and this project's own real security focus areas.
-- **[SUPPORT.md](SUPPORT.md)** — where to ask questions and report bugs.
-- **[LICENSE.md](LICENSE.md)** — this project's own license.
+## 🤝 Contributing & Community
+
+* Before a pull request run `HYDRA_UMC_CI=1 py -3 tools/ci_validate.py` (or `HYDRA_UMC_CI=1 python3 tools/ci_validate.py`): it must print `CI_VALIDATION=PASS`. Do not run `build.sh` or `build.bat` for this check; building is not a check.
+* The eight READMEs are written from one source in HYDRA-UMC-DOCS; do not edit them by hand. Change the source and write them again with `tools/make_readmes.py`.
+* Do not state in a README what has not run: say "simulated" or "not tried on hardware" where that is the truth.
+* See [CONTRIBUTING.md](CONTRIBUTING.md), the [code of conduct](CODE_OF_CONDUCT.md), [SECURITY.md](SECURITY.md) and [SUPPORT.md](SUPPORT.md).
 
 ## 👤 AUTHOR
-**JuanenRac** (Electro Hobby 3D)
-📧 electrohobby3d@gmail.com
-📺 [youtube.com/@electrohobby3d](https://youtube.com/@electrohobby3d)
+
+**JuanenRac (Electro Hobby 3D)** · electrohobby3d@gmail.com
 
 ## 📜 LICENSE
-GPL-3.0-or-later - See LICENSE for details.
+
+GPL-3.0-or-later - [LICENSE](LICENSE).

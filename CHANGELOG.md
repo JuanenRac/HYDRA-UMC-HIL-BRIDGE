@@ -4,6 +4,8 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+- **README in the universal layout:** the README and its seven translations follow the layout that the four families share (22 sections in a fixed order), with an architecture picture and a repository-structure picture drawn from `docs/architecture.json` and `docs/structure.json`; the CI validator checks both pictures and the file tree. Where the repository has a service or an MQTT transport, the README now says how to start it and which environment variables it reads.
+
 - **The layout of the README is checked in the CI:** the validator runs `tools/universal_readme_check.py` and lists, as a warning, what differs from the universal layout of the README.
 
 ## [0.1.0] - The joints and ranges of the robot come from its URDF and requests are served by several workers
@@ -109,6 +111,7 @@ All notable changes to this project are documented here.
 - Real verification beyond the test suite: `route --transport-timeout-ms 100 --transport-latency-ms 500` and `--transport-disconnected` both correctly report `TRANSPORT FAILURE` with exit code 3, never `SENT`.
 
 ## [0.0.2] - Real v0 mode-based routing and safety interlock
+
 - `protocol.rs` - real `JointCommand` and `Mode` (Real/Simulation) types.
 - `interlock.rs` - `assess_interlock()`: the real code-level enforcement of the "Safety Interlock" feature this README already advertised - blocks a real-hardware-bound command whenever a `TwinRiskReport` says a collision is imminent, trusting the twin's own conclusion rather than re-deriving one from a raw distance threshold. Advisory-blocking only, in the same spirit as HYDRA-UMC-SAFETY-ZONES's detect-vs-enforce boundary: this bridge can refuse to forward a command, physical enforcement still belongs to the firmware alone.
 - `bridge.rs` - `Bridge::route_command()`: real mode-based routing, interlock-gated only in `Real` mode (`Simulation` mode is never gated - the point of simulating is to see a predicted collision, not have it swallowed). `Bridge::mirror_command()`: unconditional real-vs-virtual shadowing. `CommandSink` trait + `RecordingSink`, the one real (non-transmitting, honestly so) implementation today - no gRPC/WebSocket transport exists yet.

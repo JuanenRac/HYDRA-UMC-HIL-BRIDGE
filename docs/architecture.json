@@ -1,0 +1,131 @@
+{
+  "repo": "HYDRA-UMC-HIL-BRIDGE",
+  "ecosystem": "hydra",
+  "tagline": "A joint moves only with a fresh, signed interlock certificate from the digital twin.",
+  "description": "HYDRA-UMC-HIL-BRIDGE routes a command for a real or a simulated robot. In real mode it accepts the command only with an ed25519 interlock certificate that the digital twin signed a moment ago, checks the joint against the URDF limits and keeps a watchdog that stops the joint when its lease runs out. A local HTTP API, guarded by a Bearer token, and a command line reach the same decision logic.",
+  "columns": [
+    "WHO COMMANDS IT",
+    "THIS REPOSITORY",
+    "WHAT IT TALKS TO"
+  ],
+  "nodes": [
+    {
+      "id": "caller",
+      "column": 0,
+      "level": "external",
+      "title": "Control interface",
+      "lines": [
+        "POST /route and /mirror",
+        "with a Bearer token"
+      ]
+    },
+    {
+      "id": "twin",
+      "column": 0,
+      "level": "external",
+      "title": "HYDRA-UMC-TWIN",
+      "lines": [
+        "signs the interlock",
+        "certificate"
+      ]
+    },
+    {
+      "id": "srv",
+      "column": 1,
+      "level": "contract",
+      "title": "server.rs",
+      "lines": [
+        "HTTP API, token, 16 KiB",
+        "body, 8 workers, audit ring"
+      ],
+      "code": [
+        "src/server.rs::MAX_BODY_BYTES",
+        "src/access.rs",
+        "src/audit.rs"
+      ]
+    },
+    {
+      "id": "cert",
+      "column": 1,
+      "level": "contract",
+      "title": "certificate.rs",
+      "lines": [
+        "ed25519 certificate: fresh, no",
+        "replay, minimum clearance"
+      ],
+      "code": [
+        "src/certificate.rs::NONCE_CACHE_CAPACITY",
+        "src/interlock.rs"
+      ]
+    },
+    {
+      "id": "wd",
+      "column": 1,
+      "level": "tested",
+      "title": "watchdog.rs, limits.rs",
+      "lines": [
+        "stop on lease expiry; URDF",
+        "joint limits"
+      ],
+      "code": [
+        "src/watchdog.rs",
+        "src/limits.rs"
+      ]
+    },
+    {
+      "id": "core",
+      "column": 2,
+      "level": "untested",
+      "title": "Real robot / STM32",
+      "lines": [
+        "planned transport; never run",
+        "against a real robot"
+      ],
+      "title_size": 12
+    },
+    {
+      "id": "sim",
+      "column": 2,
+      "level": "untested",
+      "title": "Simulated robot",
+      "lines": [
+        "planned twin transport"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "caller",
+      "to": "srv",
+      "label": "HTTP",
+      "level": "tested"
+    },
+    {
+      "from": "twin",
+      "to": "cert",
+      "label": "signs",
+      "level": "contract"
+    },
+    {
+      "from": "srv",
+      "to": "cert",
+      "level": "tested"
+    },
+    {
+      "from": "cert",
+      "to": "wd",
+      "level": "tested"
+    },
+    {
+      "from": "wd",
+      "to": "core",
+      "level": "untested"
+    },
+    {
+      "from": "wd",
+      "to": "sim",
+      "level": "untested"
+    }
+  ],
+  "footer": "The decision logic is real and tested; the transports to a real robot and to the twin are still to come."
+}

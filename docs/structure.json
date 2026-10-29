@@ -1,0 +1,354 @@
+{
+  "repo": "HYDRA-UMC-HIL-BRIDGE",
+  "ecosystem": "hydra",
+  "svg": "en",
+  "cards": [
+    {
+      "name": "src/",
+      "span": 3,
+      "accent": "a",
+      "sub": {
+        "en": "the service, in Rust",
+        "es": "el servicio, en Rust",
+        "de": "der Dienst in Rust",
+        "fr": "le service, en Rust",
+        "it": "il servizio, in Rust",
+        "ja": "Rust のサービス",
+        "zh": "用 Rust 编写的服务",
+        "pt": "o serviço, em Rust"
+      },
+      "rows": [
+        {
+          "name": "bridge.rs",
+          "desc": {
+            "en": "route and mirror decisions",
+            "es": "decisiones de ruta y espejo",
+            "de": "Routen- und Spiegel-Entscheidungen",
+            "fr": "décisions de route et de miroir",
+            "it": "decisioni di instradamento e specchio",
+            "ja": "経路とミラーの判断",
+            "zh": "路由与镜像决策",
+            "pt": "decisões de rota e espelho"
+          }
+        },
+        {
+          "name": "certificate.rs",
+          "desc": {
+            "en": "the signed interlock certificate (ed25519)",
+            "es": "el certificado de enclavamiento firmado (ed25519)",
+            "de": "das signierte Verriegelungszertifikat (ed25519)",
+            "fr": "le certificat de verrouillage signé (ed25519)",
+            "it": "il certificato di interblocco firmato (ed25519)",
+            "ja": "署名付きインターロック証明書（ed25519）",
+            "zh": "签名的联锁证书（ed25519）",
+            "pt": "o certificado de interbloqueio assinado (ed25519)"
+          }
+        },
+        {
+          "name": "interlock.rs, limits.rs",
+          "desc": {
+            "en": "interlock rules and URDF joint limits",
+            "es": "reglas de enclavamiento y límites de articulación URDF",
+            "de": "Verriegelungsregeln und URDF-Gelenkgrenzen",
+            "fr": "règles de verrouillage et limites d'articulation URDF",
+            "it": "regole di interblocco e limiti dei giunti URDF",
+            "ja": "インターロック規則と URDF の関節制限",
+            "zh": "联锁规则与 URDF 关节限位",
+            "pt": "regras de interbloqueio e limites de articulação URDF"
+          },
+          "tree_name": "interlock.rs limits.rs"
+        },
+        {
+          "name": "server.rs",
+          "desc": {
+            "en": "the HTTP API, workers and the watchdog thread",
+            "es": "la API HTTP, trabajadores y el hilo vigilante",
+            "de": "die HTTP-API, Worker und der Watchdog-Thread",
+            "fr": "l'API HTTP, les workers et le fil de chien de garde",
+            "it": "l'API HTTP, i worker e il thread watchdog",
+            "ja": "HTTP API、ワーカー、ウォッチドッグ",
+            "zh": "HTTP API、工作线程与看门狗线程",
+            "pt": "a API HTTP, workers e o fio de vigilância"
+          }
+        },
+        {
+          "name": "watchdog.rs",
+          "desc": {
+            "en": "stops a joint when its lease expires",
+            "es": "para una articulación al vencer su concesión",
+            "de": "stoppt ein Gelenk, wenn seine Lease abläuft",
+            "fr": "arrête une articulation à l'échéance de son bail",
+            "it": "ferma un giunto alla scadenza del suo lease",
+            "ja": "リース切れで関節を停止",
+            "zh": "租约到期时停止关节",
+            "pt": "pára uma articulação quando o seu lease expira"
+          }
+        },
+        {
+          "name": "access.rs, audit.rs",
+          "desc": {
+            "en": "Bearer token and the audit ring",
+            "es": "token Bearer y el anillo de auditoría",
+            "de": "Bearer-Token und der Audit-Ring",
+            "fr": "jeton Bearer et l'anneau d'audit",
+            "it": "token Bearer e l'anello di audit",
+            "ja": "Bearer トークンと監査リング",
+            "zh": "Bearer 令牌与审计环",
+            "pt": "token Bearer e o anel de auditoria"
+          },
+          "tree_name": "access.rs audit.rs"
+        },
+        {
+          "name": "protocol.rs, main.rs",
+          "desc": {
+            "en": "message shapes, CLI and start-up",
+            "es": "formas de mensaje, CLI y arranque",
+            "de": "Nachrichtenformen, CLI und Start",
+            "fr": "formes de message, CLI et démarrage",
+            "it": "forme dei messaggi, CLI e avvio",
+            "ja": "メッセージ形式、CLI、起動",
+            "zh": "消息格式、命令行与启动",
+            "pt": "formas de mensagem, CLI e arranque"
+          },
+          "tree_name": "protocol.rs main.rs"
+        }
+      ]
+    },
+    {
+      "name": {
+        "en": "tests, docs and tools",
+        "es": "pruebas, docs y herramientas",
+        "de": "Tests, Doku und Werkzeuge",
+        "fr": "tests, docs et outils",
+        "it": "test, documenti e strumenti",
+        "ja": "テスト・文書・ツール",
+        "zh": "测试、文档和工具",
+        "pt": "testes, docs e ferramentas"
+      },
+      "kind": "group",
+      "span": 3,
+      "accent": "b",
+      "columns": 2,
+      "rows": [
+        {
+          "name": "docs/",
+          "desc": {
+            "en": "the command-line reference and the interlock certificate",
+            "es": "la referencia de la línea de órdenes y el certificado de enclavamiento",
+            "de": "die Kommandozeilen-Referenz und das Verriegelungszertifikat",
+            "fr": "la référence de la ligne de commande et le certificat de verrouillage",
+            "it": "il riferimento della riga di comando e il certificato di interblocco",
+            "ja": "コマンドラインのリファレンスとインターロック証明書",
+            "zh": "命令行参考与联锁证书",
+            "pt": "a referência da linha de comandos e o certificado de interbloqueio"
+          }
+        },
+        {
+          "name": "systemd/",
+          "desc": {
+            "en": "service unit for the CM5",
+            "es": "unidad de servicio para la CM5",
+            "de": "Dienst-Unit für den CM5",
+            "fr": "unité de service pour la CM5",
+            "it": "unità di servizio per la CM5",
+            "ja": "CM5 用のサービスユニット",
+            "zh": "CM5 的服务单元",
+            "pt": "unidade de serviço para o CM5"
+          }
+        },
+        {
+          "name": "tools/",
+          "desc": {
+            "en": "project tools, CI checks, version bump",
+            "es": "herramientas del proyecto, comprobaciones de CI, subida de versión",
+            "de": "Projektwerkzeuge, CI-Prüfungen, Versionserhöhung",
+            "fr": "outils du projet, vérifications CI, montée de version",
+            "it": "strumenti del progetto, controlli CI, aumento di versione",
+            "ja": "プロジェクトのツール、CI の検査、バージョンの引き上げ",
+            "zh": "项目工具、CI 检查、版本提升",
+            "pt": "ferramentas do projeto, verificações de CI, subida de versão"
+          },
+          "tree_desc": {
+            "en": "build and test runner, version bump, CI validator, README and picture generators and checks",
+            "es": "ejecutor de compilación y pruebas, subida de versión, validador de CI, generadores y comprobaciones de README e imágenes",
+            "de": "Build- und Testläufer, Versionserhöhung, CI-Prüfer, README- und Bildgeneratoren samt Prüfungen",
+            "fr": "exécuteur de build et de tests, montée de version, validateur CI, générateurs et vérifications des README et des images",
+            "it": "esecutore di build e test, aumento di versione, validatore CI, generatori e controlli di README e immagini",
+            "ja": "ビルド・テスト実行、バージョン引き上げ、CI 検証、README と図の生成・検査",
+            "zh": "构建与测试运行器、版本提升、CI 校验、README 与图片的生成和检查",
+            "pt": "executor de compilação e testes, subida de versão, validador de CI, geradores e verificações de README e imagens"
+          }
+        },
+        {
+          "name": "images/",
+          "desc": {
+            "en": "banner and the pictures of the README",
+            "es": "banner y las imágenes del README",
+            "de": "Banner und die Bilder der README",
+            "fr": "bannière et images du README",
+            "it": "banner e immagini del README",
+            "ja": "バナーと README の図",
+            "zh": "横幅图与 README 的图片",
+            "pt": "faixa e imagens do README"
+          }
+        },
+        {
+          "name": ".github/",
+          "desc": {
+            "en": "CI workflow and issue templates",
+            "es": "flujo de CI y plantillas de incidencias",
+            "de": "CI-Workflow und Issue-Vorlagen",
+            "fr": "workflow CI et modèles de tickets",
+            "it": "workflow CI e modelli di segnalazione",
+            "ja": "CI ワークフローと Issue テンプレート",
+            "zh": "CI 工作流和 Issue 模板",
+            "pt": "fluxo de CI e modelos de questões"
+          }
+        }
+      ]
+    },
+    {
+      "name": {
+        "en": "project files",
+        "es": "ficheros del proyecto",
+        "de": "Projektdateien",
+        "fr": "fichiers du projet",
+        "it": "file del progetto",
+        "ja": "プロジェクトのファイル",
+        "zh": "项目文件",
+        "pt": "ficheiros do projeto"
+      },
+      "kind": "group",
+      "span": 3,
+      "accent": "c",
+      "columns": 2,
+      "rows": [
+        {
+          "name": "hydra-umc.project.json",
+          "desc": {
+            "en": "manifest: version, maturity, family",
+            "es": "manifiesto: versión, madurez, familia",
+            "de": "Manifest: Version, Reifegrad, Familie",
+            "fr": "manifeste : version, maturité, famille",
+            "it": "manifesto: versione, maturità, famiglia",
+            "ja": "マニフェスト：バージョン・成熟度・ファミリー",
+            "zh": "清单：版本、成熟度、系列",
+            "pt": "manifesto: versão, maturidade, família"
+          }
+        },
+        {
+          "name": "CHANGELOG.md",
+          "desc": {
+            "en": "what changed in each version",
+            "es": "qué cambió en cada versión",
+            "de": "was sich in jeder Version geändert hat",
+            "fr": "ce qui a changé à chaque version",
+            "it": "cosa è cambiato in ogni versione",
+            "ja": "各バージョンの変更点",
+            "zh": "每个版本的变化",
+            "pt": "o que mudou em cada versão"
+          }
+        },
+        {
+          "name": "build.sh  build.bat",
+          "tree_name": "build.sh build.bat",
+          "desc": {
+            "en": "build scripts (they never change the version)",
+            "es": "scripts de compilación (nunca cambian la versión)",
+            "de": "Build-Skripte (ändern die Version nie)",
+            "fr": "scripts de build (ils ne changent jamais la version)",
+            "it": "script di build (non cambiano mai la versione)",
+            "ja": "ビルドスクリプト（バージョンは変えません）",
+            "zh": "构建脚本（从不改变版本）",
+            "pt": "scripts de compilação (nunca mudam a versão)"
+          }
+        },
+        {
+          "name": "build-test.sh  build-test.bat",
+          "tree_name": "build-test.sh build-test.bat",
+          "desc": {
+            "en": "build scripts (they never change the version)",
+            "es": "scripts de compilación (nunca cambian la versión)",
+            "de": "Build-Skripte (ändern die Version nie)",
+            "fr": "scripts de build (ils ne changent jamais la version)",
+            "it": "script di build (non cambiano mai la versione)",
+            "ja": "ビルドスクリプト（バージョンは変えません）",
+            "zh": "构建脚本（从不改变版本）",
+            "pt": "scripts de compilação (nunca mudam a versão)"
+          }
+        },
+        {
+          "name": "test.sh  test.bat",
+          "tree_name": "test.sh test.bat",
+          "desc": {
+            "en": "run the tests",
+            "es": "ejecutan las pruebas",
+            "de": "führen die Tests aus",
+            "fr": "lancent les tests",
+            "it": "eseguono i test",
+            "ja": "テストを実行",
+            "zh": "运行测试",
+            "pt": "executam os testes"
+          }
+        },
+        {
+          "name": "Cargo.toml  Cargo.lock",
+          "desc": {
+            "en": "Rust package and locked dependencies",
+            "es": "paquete de Rust y dependencias fijadas",
+            "de": "Rust-Paket und festgelegte Abhängigkeiten",
+            "fr": "paquet Rust et dépendances figées",
+            "it": "pacchetto Rust e dipendenze bloccate",
+            "ja": "Rust パッケージと固定した依存関係",
+            "zh": "Rust 包与锁定的依赖",
+            "pt": "pacote Rust e dependências fixadas"
+          },
+          "tree_name": "Cargo.toml / Cargo.lock"
+        },
+        {
+          "name": "bump_version.py",
+          "desc": {
+            "en": "explicit version bump",
+            "es": "subida de versión explícita",
+            "de": "ausdrückliche Versionserhöhung",
+            "fr": "montée de version explicite",
+            "it": "aumento di versione esplicito",
+            "ja": "明示的なバージョン引き上げ",
+            "zh": "显式的版本提升",
+            "pt": "subida de versão explícita"
+          },
+          "tree_name": "bump_version.py / bump_manifest_version.py"
+        },
+        {
+          "name": "run.sh  run.bat",
+          "desc": {
+            "en": "start the service",
+            "es": "arrancar el servicio",
+            "de": "den Dienst starten",
+            "fr": "démarrer le service",
+            "it": "avviare il servizio",
+            "ja": "サービスを起動",
+            "zh": "启动服务",
+            "pt": "arrancar o serviço"
+          },
+          "tree_name": "run.sh run.bat"
+        },
+        {
+          "name": "SECURITY  SUPPORT  CONTRIBUTING  LICENSE",
+          "tree_name": "SECURITY.md SUPPORT.md CONTRIBUTING.md CODE_OF_CONDUCT.md LICENSE LICENSE.md",
+          "desc": {
+            "en": "community and licence files",
+            "es": "comunidad y licencia",
+            "de": "Community und Lizenz",
+            "fr": "communauté et licence",
+            "it": "comunità e licenza",
+            "ja": "コミュニティとライセンス",
+            "zh": "社区与许可证",
+            "pt": "comunidade e licença"
+          },
+          "tree_desc": ""
+        }
+      ]
+    }
+  ]
+}
