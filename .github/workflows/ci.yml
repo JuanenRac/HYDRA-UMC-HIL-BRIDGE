@@ -121,3 +121,16 @@ jobs:
         run: |
           chmod +x build_firmware.sh
           ./build_firmware.sh
+
+  rust-msrv:
+    name: Build with Rust 1.85.1 (Debian trixie toolchain)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+      - name: Set up Rust 1.85.1
+        uses: dtolnay/rust-toolchain@1.85.1
+      - name: Build release with the locked dependency versions
+        run: cargo build --release --locked
+      - name: Check all targets with the locked dependency versions
+        run: cargo check --all-targets --locked
