@@ -251,3 +251,29 @@ command, too old, from the future or already used, answers `200` with `{"Blocked
 
 **Validity window and watchdog.** A `POST /route` in real mode carries `issued_at_ms` (milliseconds since the epoch), `valid_for_ms` (1 up to `--max-valid-for-ms`) and, optionally, a `seq` that must grow for each joint. A command that is already expired, issued more than 2 s in the future, good for too long or not newer than the last accepted for its joint is blocked (`BlockedByInterlock`) before its certificate is used. A delivered command holds a lease on its joint until `issued_at_ms + valid_for_ms`; when it ends without a newer valid command the bridge stops the joint itself (`phase` `watchdog`, `kind` `watchdog_stop` in the audit) whether the producer is alive or not. `GET /stats` adds `outsideLimits`, `urdfLimits` (joints read from the URDF, `null` without one), `workers`, `staleCommands`, `watchdogStops`, `watchdogStopFailures`, `watchdogRequiresValidity`, `watchdogMaxValidForMs` and `activeLeases`. The stop reaches the same recording sink as the commands, because no transport is wired in yet.
 
+
+## Telling the twin where the real joints are (`serve --twin-url`)
+
+The twin signs the risk of a command from what it believes about the robot, so what it believes has to follow the hardware. With `--twin-url` the bridge
+reports to `POST /interlock/state` of HYDRA-UMC-TWIN: the position of a joint right after a real command was delivered (`source: "commanded"`) and, on
+`POST /measured {"joint", "position"}`, the position the controller read back (`source: "measured"`).
+
+```json
+{"joint":"shoulder","position":0.5,"seq":7,"stamp_ms":1700000000000,"source":"measured"}
+```
+
+`seq` is made from the clock and a per-joint counter, so it grows even across a restart; the twin refuses a report that is not newer than the last one of its joint, and
+the bridge takes that refusal (`409`) as "a newer report got there first". A report is sent after the lock of the real orders is released and never changes what happened to
+the command: if it cannot be delivered the command stays `SentReal`, the failure is counted (`twinReportFailures`), `twinInSync` turns `false` until a later report arrives,
+and the audit log gets a `twin_report` record with the reason. The answer of `POST /route` carries `X-Twin-Report: delivered|failed` when a real command was reported.
+Simulation mode and blocked commands are never reported.
+
+| Flag | Environment | Meaning |
+|---|---|---|
+| `--twin-url http://HOST:PORT` | | Where the twin listens (plain HTTP, no path). Without it the twin is not told. |
+| `--twin-state-token-file FILE` | `HYDRA_UMC_HIL_BRIDGE_TWIN_TOKEN` | The token the twin asks for on `/interlock/*` (at least 16 characters). Required with `--twin-url`. |
+| `--twin-timeout-ms N` | | Connect, write and read limit of one report, 10 to 10000 (default 500). |
+
+`GET /stats` adds `twinLinked`, `twinReports`, `twinReportFailures` and `twinInSync` (`null` until the first report). The fail-closed half is in the twin: started with
+`--require-fresh-state-ms N` it signs no certificate for a joint it has not heard of in the last N milliseconds, and without a certificate the real mode blocks.
+Nothing here was tried against a real controller: the link has only run between the two programs on one machine.

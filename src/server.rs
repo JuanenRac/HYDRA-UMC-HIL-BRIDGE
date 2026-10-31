@@ -27,6 +27,9 @@ use crate::certificate::{verify, Certificate, CertificatePolicy, NonceCache, Tru
 use crate::interlock::TwinRiskReport;
 use crate::limits::JointLimits;
 use crate::protocol::{JointCommand, Mode};
+use crate::twin_link::{
+    deliver, JointStateReport, MirrorOutcome, StateSequencer, StateSource, TwinStateSink,
+};
 use crate::watchdog::{Leases, Validity, WatchdogConfig};
 
 fn json_header() -> Header {
@@ -155,6 +158,10 @@ struct Stats {
     outside_limits: u64,
     watchdog_stops: u64,
     watchdog_stop_failures: u64,
+    twin_reports: u64,
+    twin_report_failures: u64,
+    /// Whether the last report to the twin arrived (None: none was tried yet or no twin is configured).
+    twin_in_sync: Option<bool>,
 }
 
 /// How the interlock of the real mode is certified. The default trusts no twin and accepts no unsigned report: a real command is blocked
@@ -181,6 +188,8 @@ pub struct ServerConfig {
     pub limits: Option<JointLimits>,
     /// How many requests are served at once (0: `DEFAULT_WORKERS`).
     pub workers: usize,
+    /// Where the position of the real joints is reported (`--twin-url`). None: the twin is not told.
+    pub twin: Option<std::sync::Arc<dyn TwinStateSink>>,
 }
 
 /// What the bridge itself knows about who sent a request.
@@ -256,6 +265,9 @@ struct State {
     stats: Stats,
     leases: Leases,
     hold_sink: RecordingSink,
+    twin_seq: StateSequencer,
+    /// The report of a real command that was just delivered, made under the lock and sent after it is released.
+    pending_twin: Option<JointStateReport>,
 }
 
 struct Shared {
@@ -313,6 +325,8 @@ pub fn run_with_config(server: Server, config: ServerConfig) {
         stats: Stats::default(),
         leases: Leases::new(config.watchdog),
         hold_sink: RecordingSink::default(),
+        twin_seq: StateSequencer::default(),
+        pending_twin: None,
     };
     let shared = Arc::new(Shared {
         config,
@@ -397,6 +411,10 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
                 "activeLeases": state.leases.active(now_ms()),
                 "certifiedMode": !config.interlock.trusted_keys.is_empty(),
                 "unsignedRiskAllowed": config.interlock.allow_unsigned_risk,
+                "twinLinked": config.twin.is_some(),
+                "twinReports": stats.twin_reports,
+                "twinReportFailures": stats.twin_report_failures,
+                "twinInSync": stats.twin_in_sync,
                 "urdfLimits": config.limits.as_ref().map(|l| l.len()),
                 "workers": if config.workers == 0 { DEFAULT_WORKERS } else { config.workers },
             })
@@ -415,7 +433,10 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
     }
     if request.method() != &Method::Post {
         shared.lock().stats.not_found += 1;
-        if matches!(path.as_str(), "/route" | "/mirror" | "/stats" | "/audit") {
+        if matches!(
+            path.as_str(),
+            "/route" | "/mirror" | "/measured" | "/stats" | "/audit"
+        ) {
             Reply::json(405, json!({"error": "method not allowed"}))
                 .with(
                     "Allow",
@@ -466,18 +487,31 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
     };
     let reply = match path.as_str() {
         "/route" => {
-            let mut state = shared.lock();
-            handle_route(
-                &raw,
-                &mut state,
-                &RouteContext {
-                    fault_injection: config.fault_injection,
-                    interlock: &config.interlock,
-                    limits: config.limits.as_ref(),
-                },
-                &info,
-            )
+            let (reply, pending) = {
+                let mut state = shared.lock();
+                let reply = handle_route(
+                    &raw,
+                    &mut state,
+                    &RouteContext {
+                        fault_injection: config.fault_injection,
+                        interlock: &config.interlock,
+                        limits: config.limits.as_ref(),
+                        twin_linked: config.twin.is_some(),
+                    },
+                    &info,
+                );
+                (reply, state.pending_twin.take())
+            };
+            // The twin is told AFTER the lock is released: the call can take as long as its timeout, and the command already went.
+            match pending {
+                Some(report) => {
+                    let outcome = report_to_twin(shared, &report, &info);
+                    reply.with("X-Twin-Report", outcome.kind())
+                }
+                None => reply,
+            }
         }
+        "/measured" => handle_measured(&raw, shared, &info),
         "/mirror" => handle_mirror(&raw, &mut shared.lock().stats),
         _ => {
             shared.lock().stats.not_found += 1;
@@ -541,6 +575,8 @@ struct RouteContext<'a> {
     interlock: &'a InterlockConfig,
     /// The joints and ranges of the robot (`--urdf`), when known.
     limits: Option<&'a JointLimits>,
+    /// A twin is configured: a delivered real command is reported to it.
+    twin_linked: bool,
 }
 
 fn audit_entry(
@@ -577,6 +613,8 @@ fn handle_route(raw: &str, state: &mut State, context: &RouteContext, info: &Req
         audit,
         stats,
         leases,
+        twin_seq,
+        pending_twin,
         ..
     } = state;
     let fault_injection = context.fault_injection;
@@ -709,6 +747,16 @@ fn handle_route(raw: &str, state: &mut State, context: &RouteContext, info: &Req
         if let Some(validity) = &validity {
             leases.grant(&command.joint, command.position, validity);
         }
+        if context.twin_linked {
+            let seq = twin_seq.next(&command.joint, now_ms());
+            *pending_twin = Some(JointStateReport {
+                joint: command.joint.clone(),
+                position: command.position,
+                seq,
+                stamp_ms: now_ms(),
+                source: StateSource::Commanded,
+            });
+        }
     }
     if req.mode == Mode::Real {
         let mut done = audit_entry(
@@ -743,6 +791,100 @@ fn handle_route(raw: &str, state: &mut State, context: &RouteContext, info: &Req
             "X-Delivered",
             if outcome.delivered() { "true" } else { "false" },
         )
+}
+
+/// Sends one report to the twin (outside the lock), counts it and leaves an audit record. A report that failed does not undo the command it
+/// follows: the command already went; the failure shows in `GET /stats` (`twinInSync`) and in the audit log.
+fn report_to_twin(shared: &Shared, report: &JointStateReport, info: &RequestInfo) -> MirrorOutcome {
+    let outcome = deliver(shared.config.twin.as_deref(), report);
+    let mut state = shared.lock();
+    match &outcome {
+        MirrorOutcome::Delivered => {
+            state.stats.twin_reports += 1;
+            state.stats.twin_in_sync = Some(true);
+        }
+        MirrorOutcome::Failed { reason } => {
+            state.stats.twin_report_failures += 1;
+            state.stats.twin_in_sync = Some(false);
+            eprintln!(
+                "[hil-bridge] the twin was not told where joint {:?} is: {reason}",
+                report.joint
+            );
+        }
+        MirrorOutcome::NotConfigured => {}
+    }
+    if outcome != MirrorOutcome::NotConfigured {
+        let entry = AuditEntry {
+            at_ms: now_ms(),
+            phase: "twin_report",
+            caller: info.caller.clone(),
+            peer: info.peer.clone(),
+            authenticated: info.authenticated,
+            mode: "real",
+            joint: report.joint.clone(),
+            position: report.position,
+            certificate_key_id: None,
+            certificate_nonce: None,
+            kind: Some(outcome.kind()),
+            delivered: Some(outcome == MirrorOutcome::Delivered),
+            reason: match &outcome {
+                MirrorOutcome::Failed { reason } => Some(reason.clone()),
+                _ => None,
+            },
+        };
+        if let Err(e) = state.audit.record(entry) {
+            state.stats.audit_failures += 1;
+            eprintln!("[hil-bridge] audit failure for a twin report: {e}");
+        }
+    }
+    outcome
+}
+
+/// `POST /measured`: the controller read a joint back; tell the twin where it really is. Not gated by the interlock (it is observation),
+/// but it needs a configured twin to mean anything.
+fn handle_measured(raw: &str, shared: &Shared, info: &RequestInfo) -> Reply {
+    let req: MirrorRequest = match serde_json::from_str(raw) {
+        Ok(r) => r,
+        Err(e) => {
+            shared.lock().stats.malformed_requests += 1;
+            return Reply::json(
+                400,
+                json!({"error": format!("malformed request JSON: {e}")}),
+            );
+        }
+    };
+    let command = JointCommand {
+        joint: req.joint,
+        position: req.position,
+    };
+    if let Err(reason) = command.validate() {
+        shared.lock().stats.malformed_requests += 1;
+        return Reply::json(400, json!({"error": reason}));
+    }
+    if shared.config.twin.is_none() {
+        return Reply::json(
+            200,
+            json!({"reported": false, "error": "no twin is configured (--twin-url)"}),
+        );
+    }
+    let report = {
+        let mut state = shared.lock();
+        let seq = state.twin_seq.next(&command.joint, now_ms());
+        JointStateReport {
+            joint: command.joint,
+            position: command.position,
+            seq,
+            stamp_ms: now_ms(),
+            source: StateSource::Measured,
+        }
+    };
+    match report_to_twin(shared, &report, info) {
+        MirrorOutcome::Delivered => Reply::json(200, json!({"reported": true, "seq": report.seq})),
+        MirrorOutcome::Failed { reason } => {
+            Reply::json(200, json!({"reported": false, "error": reason}))
+        }
+        MirrorOutcome::NotConfigured => Reply::json(200, json!({"reported": false})),
+    }
 }
 
 fn handle_mirror(raw: &str, stats: &mut Stats) -> Reply {
@@ -1897,5 +2039,135 @@ Content-Length: 500
         // 80 orders leave 160 records (an order and an outcome each); the body may come in chunks, so they are counted in the text
         assert_eq!(audit.matches("\"phase\":\"order\"").count(), 80, "{audit}");
         assert_eq!(audit.matches("\"phase\":\"outcome\"").count(), 80);
+    }
+
+    // ---- the way back to the twin (see twin_link.rs) ----
+
+    fn twin_config(sink: &std::sync::Arc<crate::twin_link::RecordingStateSink>) -> ServerConfig {
+        let sink: std::sync::Arc<dyn TwinStateSink> = sink.clone();
+        ServerConfig {
+            twin: Some(sink),
+            ..certified_config()
+        }
+    }
+
+    fn stats_json(port: u16) -> serde_json::Value {
+        serde_json::from_str(&get_with(port, "/stats", "").1).unwrap()
+    }
+
+    #[test]
+    fn a_delivered_real_command_is_reported_to_the_twin_as_commanded() {
+        let sink = std::sync::Arc::new(crate::twin_link::RecordingStateSink::connected());
+        let port = start_with(twin_config(&sink));
+        let (status, resp) = post_with(
+            port,
+            "/route",
+            "",
+            &route_body("real", Some(&fresh_certificate(NONCE_A))),
+        );
+        assert_eq!(status, 200, "{resp}");
+        assert!(resp.contains("SentReal"), "{resp}");
+        let reports = sink.reports();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].joint, "shoulder");
+        assert_eq!(reports[0].position, 1.0);
+        assert_eq!(reports[0].source, StateSource::Commanded);
+        let stats = stats_json(port);
+        assert_eq!(stats["twinLinked"], true);
+        assert_eq!(stats["twinReports"], 1);
+        assert_eq!(stats["twinInSync"], true);
+    }
+
+    #[test]
+    fn a_report_that_cannot_reach_the_twin_does_not_undo_the_command_but_shows_in_the_stats_and_the_audit(
+    ) {
+        let sink = std::sync::Arc::new(crate::twin_link::RecordingStateSink::disconnected());
+        let port = start_with(twin_config(&sink));
+        let (_, resp) = post_with(
+            port,
+            "/route",
+            "",
+            &route_body("real", Some(&fresh_certificate(NONCE_A))),
+        );
+        assert!(resp.contains("SentReal"), "{resp}");
+        let stats = stats_json(port);
+        assert_eq!(stats["twinReportFailures"], 1);
+        assert_eq!(stats["twinReports"], 0);
+        assert_eq!(stats["twinInSync"], false);
+        let (_, audit) = get_with(port, "/audit", "");
+        assert!(audit.contains("twin_report"), "{audit}");
+        assert!(audit.contains("transport is disconnected"), "{audit}");
+    }
+
+    #[test]
+    fn a_blocked_command_and_a_simulated_one_are_not_reported() {
+        let sink = std::sync::Arc::new(crate::twin_link::RecordingStateSink::connected());
+        let port = start_with(twin_config(&sink));
+        // no certificate: blocked
+        post_with(port, "/route", "", &route_body("real", None));
+        // simulation mode: the real robot did not move
+        post_with(port, "/route", "", &route_body("simulation", None));
+        assert!(sink.reports().is_empty());
+        assert!(stats_json(port)["twinInSync"].is_null());
+    }
+
+    #[test]
+    fn the_measured_position_is_reported_with_a_newer_sequence_than_the_commanded_one() {
+        let sink = std::sync::Arc::new(crate::twin_link::RecordingStateSink::connected());
+        let port = start_with(twin_config(&sink));
+        post_with(
+            port,
+            "/route",
+            "",
+            &route_body("real", Some(&fresh_certificate(NONCE_A))),
+        );
+        let (status, resp) = post_with(
+            port,
+            "/measured",
+            "",
+            r#"{"joint":"shoulder","position":0.98}"#,
+        );
+        assert_eq!(status, 200, "{resp}");
+        assert!(resp.contains("\"reported\":true"), "{resp}");
+        let reports = sink.reports();
+        assert_eq!(reports.len(), 2);
+        assert_eq!(reports[1].source, StateSource::Measured);
+        assert_eq!(reports[1].position, 0.98);
+        assert!(reports[1].seq > reports[0].seq);
+    }
+
+    #[test]
+    fn measured_without_a_twin_says_so_and_a_bad_body_is_a_400() {
+        let port = start_with(certified_config());
+        let (status, resp) = post_with(
+            port,
+            "/measured",
+            "",
+            r#"{"joint":"shoulder","position":0.98}"#,
+        );
+        assert_eq!(status, 200);
+        assert!(resp.contains("\"reported\":false"), "{resp}");
+        assert!(resp.contains("no twin is configured"), "{resp}");
+        assert_eq!(post_with(port, "/measured", "", "not json").0, 400);
+        assert_eq!(
+            post_with(port, "/measured", "", r#"{"joint":"","position":1.0}"#).0,
+            400
+        );
+        assert_eq!(get_with(port, "/measured", "").0, 405);
+    }
+
+    #[test]
+    fn a_measured_report_that_the_twin_does_not_get_is_told_to_the_caller() {
+        let sink = std::sync::Arc::new(crate::twin_link::RecordingStateSink::disconnected());
+        let port = start_with(twin_config(&sink));
+        let (status, resp) = post_with(
+            port,
+            "/measured",
+            "",
+            r#"{"joint":"shoulder","position":0.98}"#,
+        );
+        assert_eq!(status, 200);
+        assert!(resp.contains("\"reported\":false"), "{resp}");
+        assert_eq!(stats_json(port)["twinInSync"], false);
     }
 }

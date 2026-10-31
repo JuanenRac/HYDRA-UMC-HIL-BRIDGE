@@ -29,6 +29,8 @@ pub enum TransportError {
     Timeout { after_ms: u64 },
     /// The transport has no live connection to send on at all.
     Disconnected,
+    /// The other end answered and refused (an HTTP status that is not a success).
+    Rejected { status: u16 },
 }
 
 impl fmt::Display for TransportError {
@@ -38,6 +40,9 @@ impl fmt::Display for TransportError {
                 write!(f, "transport timed out after {after_ms}ms")
             }
             TransportError::Disconnected => write!(f, "transport is disconnected"),
+            TransportError::Rejected { status } => {
+                write!(f, "the other end refused it with status {status}")
+            }
         }
     }
 }

@@ -23,6 +23,7 @@ mod interlock;
 mod limits;
 mod protocol;
 mod server;
+mod twin_link;
 mod watchdog;
 
 use std::env;
@@ -280,6 +281,45 @@ fn load_workers(args: &[String]) -> Result<usize, String> {
     }
 }
 
+/// The link to HYDRA-UMC-TWIN (`--twin-url http://HOST:PORT` and its token): where the position of the real joints is reported. None when no
+/// URL is given. The token is the one the twin asks for on `/interlock/*` (`--twin-state-token-file`, or HYDRA_UMC_HIL_BRIDGE_TWIN_TOKEN).
+fn load_twin_link(
+    args: &[String],
+) -> Result<Option<std::sync::Arc<dyn twin_link::TwinStateSink>>, String> {
+    let Some(url) = find_flag(args, "--twin-url") else {
+        return Ok(None);
+    };
+    let addr = twin_link::HttpTwinSink::parse_url(&url)?;
+    let token = match find_flag(args, "--twin-state-token-file") {
+        Some(path) => std::fs::read_to_string(&path)
+            .map_err(|e| format!("cannot read --twin-state-token-file: {e}"))?
+            .trim()
+            .to_string(),
+        None => env::var("HYDRA_UMC_HIL_BRIDGE_TWIN_TOKEN")
+            .map(|t| t.trim().to_string())
+            .map_err(|_| "--twin-url needs --twin-state-token-file (or HYDRA_UMC_HIL_BRIDGE_TWIN_TOKEN): the twin asks for its token".to_string())?,
+    };
+    if token.len() < 16 {
+        return Err("the twin token must have at least 16 characters".to_string());
+    }
+    let timeout_ms: u64 = match find_flag(args, "--twin-timeout-ms") {
+        None => 500,
+        Some(raw) => match raw.parse::<u64>() {
+            Ok(ms) if (10..=10_000).contains(&ms) => ms,
+            _ => {
+                return Err(format!(
+                    "--twin-timeout-ms must be a whole number from 10 to 10000, got {raw}"
+                ))
+            }
+        },
+    };
+    Ok(Some(std::sync::Arc::new(twin_link::HttpTwinSink {
+        addr,
+        token,
+        timeout: std::time::Duration::from_millis(timeout_ms),
+    })))
+}
+
 fn run_serve(args: &[String]) -> ExitCode {
     let addr = find_flag(args, "--addr").unwrap_or_else(|| "127.0.0.1".to_string());
     let port = find_flag(args, "--port").unwrap_or_else(|| "8113".to_string());
@@ -333,6 +373,14 @@ fn run_serve(args: &[String]) -> ExitCode {
         .filter(|path| !path.trim().is_empty())
         .map(std::path::PathBuf::from);
 
+    let twin = match load_twin_link(args) {
+        Ok(twin) => twin,
+        Err(e) => {
+            eprintln!("[hil-bridge] fatal: {e}");
+            return ExitCode::from(2);
+        }
+    };
+
     match server::bind(&bind_addr) {
         Ok(bound) => {
             eprintln!(
@@ -343,7 +391,13 @@ fn run_serve(args: &[String]) -> ExitCode {
                     "no token, loopback only"
                 }
             );
-            eprintln!("[hil-bridge] POST /route, POST /mirror, GET /stats, GET /audit");
+            eprintln!(
+                "[hil-bridge] POST /route, POST /mirror, POST /measured, GET /stats, GET /audit"
+            );
+            match &twin {
+                Some(_) => eprintln!("[hil-bridge] the position of the real joints is reported to the twin (--twin-url); GET /stats says whether the last report arrived"),
+                None => eprintln!("[hil-bridge] no --twin-url: the twin is not told where the real joints are (start the twin with --require-fresh-state-ms to make it insist)"),
+            }
             let fault_injection = has_flag(args, "--fault-injection");
             if fault_injection {
                 eprintln!("[hil-bridge] simulated transport fault injection is ENABLED");
@@ -380,6 +434,7 @@ fn run_serve(args: &[String]) -> ExitCode {
                     watchdog,
                     limits,
                     workers,
+                    twin,
                 },
             );
             ExitCode::SUCCESS

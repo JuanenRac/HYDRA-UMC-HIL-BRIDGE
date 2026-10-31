@@ -4,6 +4,8 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+- **The bridge tells the twin where the real joints are.** `serve --twin-url http://HOST:PORT` (with `--twin-state-token-file` and `--twin-timeout-ms`) reports every delivered real command to `POST /interlock/state` of the twin as `commanded`, and `POST /measured` reports the position the controller read back as `measured` (`src/twin_link.rs`, `docs/CLI_REFERENCE.md`). The report has a per-joint `seq` made from the clock, so it keeps growing after a restart, and is sent after the lock of the real orders is released. A report that cannot be delivered does not undo the command: it is counted (`twinReports`, `twinReportFailures`), `GET /stats` shows `twinInSync`, the audit log gets a `twin_report` record and the answer of `/route` carries `X-Twin-Report`. Without `--twin-url` nothing changes. Tested with a simulated link that is down, a canned HTTP peer and, by hand, against the real twin.
+
 ## [0.1.1] - The test count out of the manifest notes and the universal README
 
 - **The notes of the project manifest no longer carry a hand-written test count:** the counts went out of date at every change; the number of tests is stated by the README, which is checked against the code.
