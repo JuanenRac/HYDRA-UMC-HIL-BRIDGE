@@ -72,6 +72,19 @@
           }
         },
         {
+          "name": "collision_shadow.rs",
+          "desc": {
+            "en": "asks the twin for a collision prediction, in shadow",
+            "es": "pregunta al gemelo una predicción de colisión, en sombra",
+            "de": "fragt den Zwilling im Schattenmodus nach einer Kollisionsvorhersage",
+            "fr": "demande au jumeau une prédiction de collision, en ombre",
+            "it": "chiede al gemello una previsione di collisione, in ombra",
+            "ja": "ツインに衝突予測をシャドウで問い合わせる",
+            "zh": "以影子模式向孪生体询问碰撞预测",
+            "pt": "pede ao gémeo uma previsão de colisão, em sombra"
+          }
+        },
+        {
           "name": "watchdog.rs",
           "desc": {
             "en": "stops a joint when its lease expires",

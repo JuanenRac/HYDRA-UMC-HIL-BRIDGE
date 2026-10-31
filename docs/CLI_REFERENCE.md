@@ -277,3 +277,16 @@ Simulation mode and blocked commands are never reported.
 `GET /stats` adds `twinLinked`, `twinReports`, `twinReportFailures` and `twinInSync` (`null` until the first report). The fail-closed half is in the twin: started with
 `--require-fresh-state-ms N` it signs no certificate for a joint it has not heard of in the last N milliseconds, and without a certificate the real mode blocks.
 Nothing here was tried against a real controller: the link has only run between the two programs on one machine.
+
+## Asking the twin for a collision prediction, in shadow (`serve --collision-shadow`)
+
+Off by default. With `--collision-shadow` (it needs `--twin-url` and its token, and a twin started with `--collision-predict`) the bridge asks `POST /predict/collision` of the twin after each real command that was delivered, naming the joint and the commanded position (the other joints come from the last positions the twin was told). The answer says whether the twin predicts that the robot would enter a zone of its zones file or touch itself.
+
+**It only informs.** It is asked after the command went and after the report to the twin, so it never blocks a command, never changes the decision of the interlock and never touches the certificates; a command that the shadow says would have collided is still `SentReal`. The answer is recorded in the audit log (`collision_shadow`, with the level and the number of contacts, or the reason it failed), counted in `GET /stats` and shown in the header `X-Collision-Shadow: clear|collision|failed` of the answer of `POST /route`. A twin that is down, has the route off or refuses the question is `failed` and never read as `clear`. The wait is bounded by the timeout, so the answer of `POST /route` can be late by up to that long.
+
+| Flag | Meaning |
+|---|---|
+| `--collision-shadow` | Ask the twin. Without it nothing is asked and `POST /route` answers as before. |
+| `--collision-shadow-timeout-ms N` | Connect, write and read limit of one question, 10 to 10000 (default 1000). Needs `--collision-shadow`. |
+
+`GET /stats` adds `collisionShadow`, `shadowPredictions` (answered), `shadowWouldBlock` (answered with a predicted contact), `shadowFailures` and `shadowLast` (`null` until the first question). Simulation mode and blocked commands are never asked about. Not tried with a real robot or a real controller; the prediction is described in the documentation of HYDRA-UMC-TWIN and HYDRA-UMC-PHYSICS-REPLICA.

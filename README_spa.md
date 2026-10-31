@@ -18,7 +18,7 @@ GPL-3.0-or-later - see LICENSE
   <img src="https://img.shields.io/badge/License-GPL%203.0--or--later-blue.svg" alt="GPL 3.0 or later">
   <img src="https://img.shields.io/badge/Rust-2021-DEA584.svg" alt="Rust">
   <img src="https://img.shields.io/badge/Safety-Interlock-gated-red.svg" alt="Safety">
-  <img src="https://img.shields.io/badge/Tests-115%20passing-2ea44f.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-139%20passing-2ea44f.svg" alt="Tests">
   <img src="https://img.shields.io/badge/Version-0.1.1-0f6cbd.svg" alt="Version">
   <img src="https://img.shields.io/badge/Maturity-functional-0F6CBD.svg" alt="Maturity">
 </p>
@@ -35,7 +35,7 @@ GPL-3.0-or-later - see LICENSE
 |---|---|
 | Versión | `0.1.1` |
 | Madurez | Funcional |
-| Tests | 115 (`cargo test`) |
+| Tests | 139 (`cargo test`) |
 | Tecnología | Rust / hardware-in-the-loop I/O |
 | Destino | La Raspberry Pi CM5 de una celda HYDRA-UMC |
 | En hardware real | Solo simulado: probado con emuladores, dobles de prueba o simuladores; no consta ninguna ejecución en hardware real para esta versión |
@@ -51,7 +51,7 @@ Cada línea es una parte de este repositorio y la luz dice hasta dónde llega ho
 | Área | Estado | Qué significa aquí |
 |---|---|---|
 | Software | 🟡 | Funciona para su propósito principal; la comprobación de honestidad de arriba lista lo que aún falta |
-| Pruebas | 🟢 | 115 pruebas automáticas, ejecutadas en cada cambio |
+| Pruebas | 🟢 | 139 pruebas automáticas, ejecutadas en cada cambio |
 | Hardware real | 🟠 | Solo simulado: probado con emuladores, dobles de prueba o simuladores; no consta ninguna ejecución en hardware real para esta versión |
 | Documentación | 🟢 | README en ocho idiomas, comprobado contra el manifiesto en cada cambio |
 
@@ -111,6 +111,7 @@ flowchart LR
 * 🔏 **Los comandos reales los certifica el gemelo, y cada orden queda registrada:** en modo `real` el informe que decide un comando ya no es el que escribe quien llama. La petición lleva `certificate`, un informe de riesgo firmado con la clave Ed25519 de HYDRA-UMC-TWIN para exactamente esa articulación y posición; el bridge solo tiene la clave pública (`--twin-public-key-file`) y rechaza un certificado falsificado, de otro comando, de más de 2 s (`--certificate-max-age-ms`) o ya usado. Sin clave configurada el modo real bloquea todos los comandos; `--allow-unsigned-risk` (solo para el banco, anunciado en cada arranque) vuelve a creer el informe de quien llama. Cada orden real se registra (quien llama por `X-Hydra-Caller`, la dirección del par, si se presentó el token Bearer, el certificado y el resultado) antes de decidirse: con `--audit-log FICHERO` se añade a un fichero y, si el registro no puede escribirse, la orden se rechaza; `GET /audit` lista las últimas. Un vector de prueba fijo, comprobado con una implementación independiente de RFC 8032, se verifica en ambos repositorios. *(implementado, probado contra el binario real del gemelo; nunca contra hardware)*
 * ⏱️ **Un comando real es un arrendamiento, y el puente para la articulación por sí solo cuando caduca:** el comando lleva `issued_at_ms`, `valid_for_ms` (como máximo 1000 ms, `--max-valid-for-ms`) y un `seq`; el que está caducado, viene del futuro, dura demasiado o no es más nuevo que el último de su articulación se bloquea antes de gastar su certificado. Si no llega un comando válido más nuevo antes de que termine el arrendamiento, el vigilante para la articulación, lo anota en la auditoría y lo cuenta en `GET /stats`, esté vivo o no el productor. Los comandos reales sin ventana se rechazan salvo con `--allow-undated-commands` (se anuncia en cada arranque). *(implementado contra el receptor que solo registra, aún sin transporte; nunca contra hardware)*
 * 📐 **Las articulaciones y rangos del robot salen de su URDF, y las peticiones las atienden varios hilos:** `serve --urdf FICHERO` bloquea un comando real para una articulación que el URDF no tiene, una fija o una posición fuera de su `<limit>` antes de gastar su certificado (`outsideLimits` en `GET /stats`); con `serve --workers N` (8 por defecto) un cliente que envía media petición ocupa un hilo y no el puente, y las órdenes reales se siguen decidiendo de una en una. *(implementado; nunca contra hardware)*
+* 🚧 **Predicción de colisión del gemelo, consultada en sombra (apagada por defecto):** con `serve --collision-shadow` (y `--twin-url`) el puente pregunta al gemelo, tras cada orden real entregada, si prevé un contacto con una zona o con el propio robot, y registra la respuesta en el registro de auditoría, en `GET /stats` y en la cabecera `X-Collision-Shadow`. Solo informa: nunca bloquea una orden ni cambia la decisión del enclavamiento, y un gemelo que no responde es `failed`, nunca `clear`. No probado con un robot real.
 * 🌉 **Puente Bidireccional (v0, sin transporte todavía):** existe encaminamiento real basado en modo (Real/Simulación) y reflejo (mirroring) real e incondicional; todavía no hay ninguna conexión gRPC/WebSocket real hacia un HYDRA-UMC-TWIN o controlador HYDRA-UMC de verdad.
 * ⚡ **Mirroring de Latencia Cero (parcial):** el subcomando real `mirror` refleja hoy un comando hacia un receptor en memoria; "latencia cero" sobre una conexión de red real sigue siendo trabajo futuro.
 * 📡 **Protocolo Unificado (planeado):** usa gRPC para sincronización local de alta velocidad y WebSockets para monitorización remota - todavía no hay ningún transporte de red conectado, a propósito (ver `Cargo.toml`).
@@ -165,7 +166,7 @@ cargo run --release -- serve --port 8113 --token-file token.txt   # real mode al
 
 ## 🧪 Pruebas
 
-115 pruebas de Rust se ejecutan con `cargo test`; están dentro de los módulos de `src/`. No necesitan hardware ni red.
+139 pruebas de Rust se ejecutan con `cargo test`; están dentro de los módulos de `src/`. No necesitan hardware ni red.
 
 El CI ejecuta `HYDRA_UMC_CI=1 python tools/ci_validate.py`, que comprueba el manifiesto, los documentos, los ocho README y las imágenes.
 
@@ -254,6 +255,7 @@ HYDRA-UMC-HIL-BRIDGE/
 │   ├── certificate.rs                           el certificado de enclavamiento firmado (ed25519)
 │   ├── interlock.rs limits.rs                   reglas de enclavamiento y límites de articulación URDF
 │   ├── server.rs                                la API HTTP, trabajadores y el hilo vigilante
+│   ├── collision_shadow.rs                      pregunta al gemelo una predicción de colisión, en sombra
 │   ├── watchdog.rs                              para una articulación al vencer su concesión
 │   ├── access.rs audit.rs                       token Bearer y el anillo de auditoría
 │   └── protocol.rs main.rs                      formas de mensaje, CLI y arranque

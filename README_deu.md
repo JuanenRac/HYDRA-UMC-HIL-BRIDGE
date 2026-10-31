@@ -18,7 +18,7 @@ GPL-3.0-or-later - see LICENSE
   <img src="https://img.shields.io/badge/License-GPL%203.0--or--later-blue.svg" alt="GPL 3.0 or later">
   <img src="https://img.shields.io/badge/Rust-2021-DEA584.svg" alt="Rust">
   <img src="https://img.shields.io/badge/Safety-Interlock-gated-red.svg" alt="Safety">
-  <img src="https://img.shields.io/badge/Tests-115%20passing-2ea44f.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-139%20passing-2ea44f.svg" alt="Tests">
   <img src="https://img.shields.io/badge/Version-0.1.1-0f6cbd.svg" alt="Version">
   <img src="https://img.shields.io/badge/Maturity-functional-0F6CBD.svg" alt="Maturity">
 </p>
@@ -35,7 +35,7 @@ GPL-3.0-or-later - see LICENSE
 |---|---|
 | Version | `0.1.1` |
 | Reifegrad | Funktionsfähig |
-| Tests | 115 (`cargo test`) |
+| Tests | 139 (`cargo test`) |
 | Technik | Rust / hardware-in-the-loop I/O |
 | Ziel | Der Raspberry Pi CM5 einer HYDRA-UMC-Zelle |
 | Auf echter Hardware | Nur simuliert: gegen Emulatoren, Attrappen oder Simulatoren getestet; für diese Version ist kein Lauf auf echter Hardware vermerkt |
@@ -51,7 +51,7 @@ Jede Zeile ist ein Teil dieses Repositorys, und die Ampel sagt, wie weit er heut
 | Bereich | Stand | Was das hier bedeutet |
 |---|---|---|
 | Software | 🟡 | Funktioniert für seinen Hauptzweck; die Ehrlichkeitsprüfung oben nennt, was noch fehlt |
-| Tests | 🟢 | 115 automatische Tests, bei jeder Änderung ausgeführt |
+| Tests | 🟢 | 139 automatische Tests, bei jeder Änderung ausgeführt |
 | Echte Hardware | 🟠 | Nur simuliert: gegen Emulatoren, Attrappen oder Simulatoren getestet; für diese Version ist kein Lauf auf echter Hardware vermerkt |
 | Dokumentation | 🟢 | README in acht Sprachen, bei jeder Änderung gegen das Manifest geprüft |
 
@@ -112,6 +112,7 @@ flowchart LR
 * 🔏 **Reale Befehle werden vom Zwilling beglaubigt, und jeder Auftrag wird festgehalten:** im Modus `real` ist der Bericht, der einen Befehl freigibt, nicht mehr der, den der Aufrufer schreibt. Die Anfrage trägt `certificate`, einen mit dem Ed25519-Schlüssel von HYDRA-UMC-TWIN signierten Risikobericht für genau dieses Gelenk und diese Position; die Bridge hält nur den öffentlichen Schlüssel (`--twin-public-key-file`) und lehnt ein gefälschtes, für einen anderen Befehl gültiges, älter als 2 s (`--certificate-max-age-ms`) oder bereits benutztes Zertifikat ab. Ohne konfigurierten Schlüssel blockiert der reale Modus jeden Befehl; `--allow-unsigned-risk` (nur Prüfstand, bei jedem Start angekündigt) glaubt dem Bericht des Aufrufers wieder. Jeder reale Auftrag wird festgehalten (der Aufrufer aus `X-Hydra-Caller`, die Peer-Adresse, ob das Bearer-Token vorgelegt wurde, das Zertifikat und das Ergebnis), bevor er entschieden wird: mit `--audit-log DATEI` wird er an eine Datei angehängt und, wenn der Eintrag nicht geschrieben werden kann, wird der Auftrag abgelehnt; `GET /audit` listet die letzten. Ein fester Testvektor, mit einer unabhängigen RFC-8032-Implementierung geprüft, wird von beiden Repositories verifiziert. *(implementiert, gegen die echte Zwilling-Binärdatei erprobt; nie gegen Hardware)*
 * ⏱️ **Ein realer Befehl ist eine Frist, und die Brücke hält das Gelenk selbst an, wenn sie abläuft:** Ein Befehl trägt `issued_at_ms`, `valid_for_ms` (höchstens 1000 ms, `--max-valid-for-ms`) und ein `seq`; ein abgelaufener, aus der Zukunft stammender, zu langer oder nicht neuerer als der letzte seines Gelenks wird blockiert, bevor sein Zertifikat verbraucht ist. Trifft vor Fristende kein neuerer gültiger Befehl ein, hält der Wächter das Gelenk an, protokolliert es im Audit und zählt es in `GET /stats`, ob der Erzeuger noch lebt oder nicht. Reale Befehle ohne Frist werden abgelehnt, außer mit `--allow-undated-commands` (bei jedem Start angekündigt). *(umgesetzt gegen die nur aufzeichnende Senke, noch ohne Transport; nie gegen Hardware)*
 * 📐 **Gelenke und Bereiche des Roboters stammen aus seiner URDF, und Anfragen werden von mehreren Arbeitern bedient:** `serve --urdf DATEI` blockiert einen realen Befehl für ein Gelenk, das die URDF nicht hat, ein festes Gelenk oder eine Position außerhalb seines `<limit>`, bevor sein Zertifikat verbraucht wird (`outsideLimits` in `GET /stats`); mit `serve --workers N` (Standard 8) hält ein Client, der nur die halbe Anfrage sendet, einen Arbeiter und nicht die Brücke auf, während reale Aufträge weiter einzeln entschieden werden. *(umgesetzt; nie gegen Hardware)*
+* 🚧 **Kollisionsvorhersage des Zwillings, im Schattenmodus abgefragt (standardmäßig aus):** mit `serve --collision-shadow` (und `--twin-url`) fragt die Brücke nach jedem ausgelieferten realen Befehl den Zwilling, ob er einen Kontakt mit einer Zone oder mit dem Roboter selbst vorhersagt, und hält die Antwort im Audit-Log, in `GET /stats` und im Header `X-Collision-Shadow` fest. Sie informiert nur: Sie blockiert nie einen Befehl und ändert nie die Entscheidung der Verriegelung, und ein Zwilling ohne Antwort ist `failed`, nie `clear`. Nicht mit einem echten Roboter erprobt.
 * 🌉 **Bidirektionale Brücke (v0, noch ohne Transport):** echtes modusbasiertes Routing (Real/Simulation) und echtes, bedingungsloses Spiegeln existieren bereits; es gibt noch keine echte gRPC/WebSocket-Verbindung zu einem echten HYDRA-UMC-TWIN oder HYDRA-UMC-Controller.
 * ⚡ **Zero-Latency Mirroring (teilweise):** der echte Subbefehl `mirror` spiegelt einen Befehl heute in einen In-Memory-Empfänger; "Zero-Latency" über eine echte Netzwerkverbindung bleibt zukünftige Arbeit.
 * 📡 **Einheitliches Protokoll (geplant):** nutzt gRPC für Hochgeschwindigkeits-Lokal-Sync und WebSockets für die Fernüberwachung - es ist absichtlich noch kein Netzwerktransport angeschlossen (siehe `Cargo.toml`).
@@ -166,7 +167,7 @@ cargo run --release -- serve --port 8113 --token-file token.txt   # real mode al
 
 ## 🧪 Tests
 
-115 Rust-Tests laufen mit `cargo test`; sie liegen in den Modulen von `src/`. Sie brauchen weder Hardware noch Netz.
+139 Rust-Tests laufen mit `cargo test`; sie liegen in den Modulen von `src/`. Sie brauchen weder Hardware noch Netz.
 
 Die CI führt `HYDRA_UMC_CI=1 python tools/ci_validate.py` aus; das prüft das Manifest, die Dokumente, die acht READMEs und die Bilder.
 
@@ -255,6 +256,7 @@ HYDRA-UMC-HIL-BRIDGE/
 │   ├── certificate.rs                           das signierte Verriegelungszertifikat (ed25519)
 │   ├── interlock.rs limits.rs                   Verriegelungsregeln und URDF-Gelenkgrenzen
 │   ├── server.rs                                die HTTP-API, Worker und der Watchdog-Thread
+│   ├── collision_shadow.rs                      fragt den Zwilling im Schattenmodus nach einer Kollisionsvorhersage
 │   ├── watchdog.rs                              stoppt ein Gelenk, wenn seine Lease abläuft
 │   ├── access.rs audit.rs                       Bearer-Token und der Audit-Ring
 │   └── protocol.rs main.rs                      Nachrichtenformen, CLI und Start

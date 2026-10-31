@@ -19,6 +19,7 @@ mod access;
 mod audit;
 mod bridge;
 mod certificate;
+mod collision_shadow;
 mod interlock;
 mod limits;
 mod protocol;
@@ -286,6 +287,55 @@ fn load_workers(args: &[String]) -> Result<usize, String> {
 fn load_twin_link(
     args: &[String],
 ) -> Result<Option<std::sync::Arc<dyn twin_link::TwinStateSink>>, String> {
+    let Some((addr, token, timeout_ms)) = twin_endpoint(args)? else {
+        return Ok(None);
+    };
+    Ok(Some(std::sync::Arc::new(twin_link::HttpTwinSink {
+        addr,
+        token,
+        timeout: std::time::Duration::from_millis(timeout_ms),
+    })))
+}
+
+/// `--collision-shadow` (off by default): after a real command is delivered, ask the twin whether it predicts a contact. It needs the link
+/// to the twin (`--twin-url`) and uses its address and token; `--collision-shadow-timeout-ms` (default 1000) is how long it waits.
+fn load_collision_shadow(
+    args: &[String],
+) -> Result<Option<std::sync::Arc<dyn collision_shadow::CollisionShadow>>, String> {
+    if !has_flag(args, "--collision-shadow") {
+        if find_flag(args, "--collision-shadow-timeout-ms").is_some() {
+            return Err("--collision-shadow-timeout-ms needs --collision-shadow".to_string());
+        }
+        return Ok(None);
+    }
+    let Some((addr, token, _)) = twin_endpoint(args)? else {
+        return Err(
+            "--collision-shadow needs --twin-url (and its token): the twin makes the prediction"
+                .to_string(),
+        );
+    };
+    let timeout_ms: u64 = match find_flag(args, "--collision-shadow-timeout-ms") {
+        None => 1000,
+        Some(raw) => match raw.parse::<u64>() {
+            Ok(ms) if (10..=10_000).contains(&ms) => ms,
+            _ => {
+                return Err(format!(
+                "--collision-shadow-timeout-ms must be a whole number from 10 to 10000, got {raw}"
+            ))
+            }
+        },
+    };
+    Ok(Some(std::sync::Arc::new(
+        collision_shadow::HttpCollisionShadow {
+            addr,
+            token,
+            timeout: std::time::Duration::from_millis(timeout_ms),
+        },
+    )))
+}
+
+/// `host:port`, the token and the timeout of `--twin-url`; None when there is no URL.
+fn twin_endpoint(args: &[String]) -> Result<Option<(String, String, u64)>, String> {
     let Some(url) = find_flag(args, "--twin-url") else {
         return Ok(None);
     };
@@ -313,11 +363,7 @@ fn load_twin_link(
             }
         },
     };
-    Ok(Some(std::sync::Arc::new(twin_link::HttpTwinSink {
-        addr,
-        token,
-        timeout: std::time::Duration::from_millis(timeout_ms),
-    })))
+    Ok(Some((addr, token, timeout_ms)))
 }
 
 fn run_serve(args: &[String]) -> ExitCode {
@@ -381,6 +427,14 @@ fn run_serve(args: &[String]) -> ExitCode {
         }
     };
 
+    let collision_shadow = match load_collision_shadow(args) {
+        Ok(shadow) => shadow,
+        Err(e) => {
+            eprintln!("[hil-bridge] fatal: {e}");
+            return ExitCode::from(2);
+        }
+    };
+
     match server::bind(&bind_addr) {
         Ok(bound) => {
             eprintln!(
@@ -397,6 +451,10 @@ fn run_serve(args: &[String]) -> ExitCode {
             match &twin {
                 Some(_) => eprintln!("[hil-bridge] the position of the real joints is reported to the twin (--twin-url); GET /stats says whether the last report arrived"),
                 None => eprintln!("[hil-bridge] no --twin-url: the twin is not told where the real joints are (start the twin with --require-fresh-state-ms to make it insist)"),
+            }
+            match &collision_shadow {
+                Some(_) => eprintln!("[hil-bridge] --collision-shadow: after each delivered real command the twin is asked whether it predicts a contact; the answer is recorded and never blocks anything"),
+                None => eprintln!("[hil-bridge] no --collision-shadow: the collision prediction of the twin is not asked"),
             }
             let fault_injection = has_flag(args, "--fault-injection");
             if fault_injection {
@@ -435,6 +493,7 @@ fn run_serve(args: &[String]) -> ExitCode {
                     limits,
                     workers,
                     twin,
+                    collision_shadow,
                 },
             );
             ExitCode::SUCCESS
@@ -500,5 +559,14 @@ mod tests {
         }
         let ok = args(&["--joint", "shoulder", "--position", "1.5"]);
         assert!(parse_command(&ok).is_ok());
+    }
+
+    #[test]
+    fn the_collision_shadow_is_off_and_needs_the_twin_link() {
+        assert!(load_collision_shadow(&args(&[])).unwrap().is_none());
+        // its options mean nothing without the switch, and the switch means nothing without a twin to ask
+        assert!(load_collision_shadow(&args(&["--collision-shadow-timeout-ms", "100"])).is_err());
+        let no_twin = load_collision_shadow(&args(&["--collision-shadow"])).unwrap_err();
+        assert!(no_twin.contains("--twin-url"), "{no_twin}");
     }
 }

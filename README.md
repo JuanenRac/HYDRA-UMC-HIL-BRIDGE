@@ -18,7 +18,7 @@ GPL-3.0-or-later - see LICENSE
   <img src="https://img.shields.io/badge/License-GPL%203.0--or--later-blue.svg" alt="GPL 3.0 or later">
   <img src="https://img.shields.io/badge/Rust-2021-DEA584.svg" alt="Rust">
   <img src="https://img.shields.io/badge/Safety-Interlock-gated-red.svg" alt="Safety">
-  <img src="https://img.shields.io/badge/Tests-115%20passing-2ea44f.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-139%20passing-2ea44f.svg" alt="Tests">
   <img src="https://img.shields.io/badge/Version-0.1.1-0f6cbd.svg" alt="Version">
   <img src="https://img.shields.io/badge/Maturity-functional-0F6CBD.svg" alt="Maturity">
 </p>
@@ -35,7 +35,7 @@ GPL-3.0-or-later - see LICENSE
 |---|---|
 | Version | `0.1.1` |
 | Maturity | Functional |
-| Tests | 115 (`cargo test`) |
+| Tests | 139 (`cargo test`) |
 | Stack | Rust / hardware-in-the-loop I/O |
 | Target | The Raspberry Pi CM5 of a HYDRA-UMC cell |
 | On real hardware | Simulated only: tested against emulators, fakes or simulators; no run on real hardware is recorded for this version |
@@ -51,7 +51,7 @@ Each line is one part of this repository and the light says how far it is today.
 | Area | State | What it means here |
 |---|---|---|
 | Software | 🟡 | Works for its main purpose; the honesty check above lists what is still missing |
-| Tests | 🟢 | 115 automated tests, run on every change |
+| Tests | 🟢 | 139 automated tests, run on every change |
 | Real hardware | 🟠 | Simulated only: tested against emulators, fakes or simulators; no run on real hardware is recorded for this version |
 | Documentation | 🟢 | README in eight languages, checked against the manifest on every change |
 
@@ -111,6 +111,7 @@ flowchart LR
 * 🔏 **Real commands are certified by the twin, and every order is accounted for:** in `real` mode the report that gates a command is no longer the one the caller writes. The request carries `certificate`, a risk report signed with the Ed25519 key of HYDRA-UMC-TWIN for exactly that joint and position; the bridge holds only the public key (`--twin-public-key-file`) and refuses a certificate that is forged, for another command, older than 2 s (`--certificate-max-age-ms`) or already used. With no key configured the real mode blocks every command; `--allow-unsigned-risk` (bench use only, announced at every start) believes the report of the caller again. Each real order is recorded (the caller from `X-Hydra-Caller`, the peer address, whether the Bearer token was presented, the certificate and the outcome) before it is decided: with `--audit-log FILE` it is appended to a file and, if the record cannot be written, the order is refused; `GET /audit` lists the last ones. A fixed test vector, checked against an independent RFC 8032 implementation, is verified by both repositories. *(implemented, tried against the real twin binary; never against hardware)*
 * ⏱️ **A real command is a lease, and the bridge stops the joint by itself when the lease runs out:** a command carries `issued_at_ms`, `valid_for_ms` (at most 1000 ms, `--max-valid-for-ms`) and a `seq`; one that is expired, from the future, too long or not newer than the last for its joint is blocked before its certificate is used up. When no newer valid command arrives before the lease ends, the watchdog stops the joint, records it in the audit and counts it in `GET /stats`, whether or not the producer is still alive. Real commands without a window are refused unless `--allow-undated-commands` (announced at every start). *(implemented against the recording sink, no transport yet; never against hardware)*
 * 📐 **The joints and ranges of the robot come from its URDF, and requests are served by several workers:** `serve --urdf FILE` blocks a real command for a joint the URDF does not have, a fixed one or a position outside its `<limit>` before its certificate is used (`outsideLimits` in `GET /stats`); `serve --workers N` (default 8) means a client that sends half a request holds one worker, not the bridge, while real orders are still decided one at a time. *(implemented; never against hardware)*
+* 🚧 **Collision prediction of the twin, asked in shadow (off by default):** with `serve --collision-shadow` (and `--twin-url`) the bridge asks the twin, after each real command it delivered, whether it predicts a contact with a zone or with the robot itself, and records the answer in the audit log, in `GET /stats` and in the header `X-Collision-Shadow`. It only informs: it never blocks a command or changes the decision of the interlock, and a twin that gives no answer is `failed`, never `clear`. Not tried with a real robot.
 * 🌉 **Bidirectional Bridge (v0, no transport yet):** real mode-based routing (Real/Simulation) and real unconditional mirroring exist; there is no real gRPC/WebSocket connection to an actual HYDRA-UMC-TWIN or HYDRA-UMC controller yet.
 * ⚡ **Zero-Latency Mirroring (partial):** the real `mirror` subcommand shadows a command into a recording sink today; "zero-latency" over a real network connection is still future work.
 * 📡 **Unified Protocol (planned):** uses gRPC for high-speed local sync and WebSockets for remote monitoring - no network transport is wired in yet, on purpose (see `Cargo.toml`).
@@ -165,7 +166,7 @@ cargo run --release -- serve --port 8113 --token-file token.txt   # real mode al
 
 ## 🧪 Testing
 
-115 Rust tests run with `cargo test`; they sit inside the modules of `src/`. They need no hardware and no network.
+139 Rust tests run with `cargo test`; they sit inside the modules of `src/`. They need no hardware and no network.
 
 The CI runs `HYDRA_UMC_CI=1 python tools/ci_validate.py`, which checks the manifest, the documents, the eight READMEs and the pictures.
 
@@ -254,6 +255,7 @@ HYDRA-UMC-HIL-BRIDGE/
 │   ├── certificate.rs                           the signed interlock certificate (ed25519)
 │   ├── interlock.rs limits.rs                   interlock rules and URDF joint limits
 │   ├── server.rs                                the HTTP API, workers and the watchdog thread
+│   ├── collision_shadow.rs                      asks the twin for a collision prediction, in shadow
 │   ├── watchdog.rs                              stops a joint when its lease expires
 │   ├── access.rs audit.rs                       Bearer token and the audit ring
 │   └── protocol.rs main.rs                      message shapes, CLI and start-up

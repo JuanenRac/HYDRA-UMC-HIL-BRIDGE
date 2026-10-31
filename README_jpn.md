@@ -18,7 +18,7 @@ GPL-3.0-or-later - see LICENSE
   <img src="https://img.shields.io/badge/License-GPL%203.0--or--later-blue.svg" alt="GPL 3.0 or later">
   <img src="https://img.shields.io/badge/Rust-2021-DEA584.svg" alt="Rust">
   <img src="https://img.shields.io/badge/Safety-Interlock-gated-red.svg" alt="Safety">
-  <img src="https://img.shields.io/badge/Tests-115%20passing-2ea44f.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-139%20passing-2ea44f.svg" alt="Tests">
   <img src="https://img.shields.io/badge/Version-0.1.1-0f6cbd.svg" alt="Version">
   <img src="https://img.shields.io/badge/Maturity-functional-0F6CBD.svg" alt="Maturity">
 </p>
@@ -35,7 +35,7 @@ GPL-3.0-or-later - see LICENSE
 |---|---|
 | バージョン | `0.1.1` |
 | 成熟度 | 機能する |
-| テスト | 115 (`cargo test`) |
+| テスト | 139 (`cargo test`) |
 | 技術 | Rust / hardware-in-the-loop I/O |
 | 対象 | HYDRA-UMC セルの Raspberry Pi CM5 |
 | 実機での確認 | シミュレーションのみ：エミュレーター、模擬部品、シミュレーターで試験済み。このバージョンについて実機での動作記録はありません |
@@ -51,7 +51,7 @@ GPL-3.0-or-later - see LICENSE
 | 領域 | 状態 | ここでの意味 |
 |---|---|---|
 | ソフトウェア | 🟡 | 主な目的では動作します。足りない点は上の正直さの確認に書かれています |
-| テスト | 🟢 | 自動テスト 115 件。変更のたびに実行されます |
+| テスト | 🟢 | 自動テスト 139 件。変更のたびに実行されます |
 | 実機 | 🟠 | シミュレーションのみ：エミュレーター、模擬部品、シミュレーターで試験済み。このバージョンについて実機での動作記録はありません |
 | ドキュメント | 🟢 | 8 言語の README。変更のたびにマニフェストと照合されます |
 
@@ -114,6 +114,7 @@ flowchart LR
 * 🔏 **実機コマンドは双子が認証し、すべての指令が記録されます:** `real` モードでは、コマンドを通す報告は呼び出し側が書いたものではなくなりました。リクエストには `certificate` が含まれます。これは HYDRA-UMC-TWIN の Ed25519 鍵で、まさにその関節と位置について署名されたリスク報告です。ブリッジは公開鍵だけを持ち(`--twin-public-key-file`)、偽造されたもの、別のコマンド用のもの、2 秒より古いもの(`--certificate-max-age-ms`)、すでに使われたものを拒否します。鍵が設定されていなければ実機モードはすべてのコマンドを止め、`--allow-unsigned-risk`(試験台専用、起動のたびに表示)は呼び出し側の報告を再び信用します。実機への指令は、判断される前に必ず記録されます(`X-Hydra-Caller` からの呼び出し元、相手のアドレス、Bearer トークンの提示の有無、証明書、結果)。`--audit-log ファイル` を指定するとファイルに追記され、記録を書けない場合は指令が拒否されます。`GET /audit` は直近の記録を一覧します。固定のテストベクトル(独立した RFC 8032 実装で確認済み)を両方のリポジトリが検証します。*(実装済み、実際の双子のバイナリで試験済み、ハードウェアでは未検証)*
 * ⏱️ **実機コマンドは期限付きの貸与で、期限が切れるとブリッジが自分で関節を停止します:** コマンドは `issued_at_ms`、`valid_for_ms`(最大 1000 ms、`--max-valid-for-ms`)、`seq` を持ちます。期限切れ、未来の時刻、長すぎるもの、その関節の直前より新しくないものは、証明書を消費する前にブロックされます。期限が切れるまでに新しい有効なコマンドが届かなければ、生産者が生きていてもいなくても、ウォッチドッグが関節を停止し、監査に記録し、`GET /stats` に数えます。窓のない実機コマンドは `--allow-undated-commands` を付けない限り拒否されます(起動のたびに通知)。*(記録するだけの送り先に対して実装済み、まだトランスポートなし。ハードウェアでは未検証)*
 * 📐 **関節と可動範囲はロボットの URDF から読み込み、リクエストは複数のワーカーで処理します:** `serve --urdf ファイル` は、URDF にない関節、固定関節、`<limit>` の範囲外の位置に対する実機コマンドを、証明書が消費される前にブロックします(`GET /stats` の `outsideLimits`)。`serve --workers N`(既定 8)では、リクエストを途中までしか送らないクライアントが占有するのはワーカー 1 つだけでブリッジ全体ではなく、実機の指令は引き続き 1 件ずつ判定されます。*(実装済み・実機に対しては未実施)*
+* 🚧 **ツインの衝突予測のシャドウ問い合わせ（既定はオフ）：** `serve --collision-shadow`（と `--twin-url`）を付けると、ブリッジは実コマンドを配信するたびに、ゾーンまたはロボット自身への接触をツインが予測するかを問い合わせ、その答えを監査ログ、`GET /stats`、ヘッダー `X-Collision-Shadow` に記録します。通知のみで、コマンドをブロックしたりインターロックの判断を変えたりすることはなく、答えのないツインは `clear` ではなく `failed` になります。実機では未検証です。
 * 🌉 **双方向ブリッジ（v0、まだトランスポートなし）：** 実際のモードベースルーティング（実際/シミュレーション）と実際の無条件ミラーリングはすでに存在します。実際の HYDRA-UMC-TWIN や HYDRA-UMC コントローラーへの実際の gRPC/WebSocket 接続はまだありません。
 * ⚡ **ゼロレイテンシーミラーリング（部分的）：** 実際の `mirror` サブコマンドは、今日はコマンドをメモリ内の記録用シンクへミラーリングします。実際のネットワーク接続上での「ゼロレイテンシー」はまだ今後の課題です。
 * 📡 **統一プロトコル（計画中）：** 高速なローカル同期には gRPC を、リモート監視には WebSocket を使用します——意図的に、まだどのネットワークトランスポートも接続されていません（`Cargo.toml` を参照）。
@@ -168,7 +169,7 @@ cargo run --release -- serve --port 8113 --token-file token.txt   # real mode al
 
 ## 🧪 テスト
 
-`cargo test` で Rust のテスト 115 件を実行します。テストは `src/` のモジュール内にあり、ハードウェアもネットワークも不要です。
+`cargo test` で Rust のテスト 139 件を実行します。テストは `src/` のモジュール内にあり、ハードウェアもネットワークも不要です。
 
 CI は `HYDRA_UMC_CI=1 python tools/ci_validate.py` を実行し、マニフェスト、文書、8 つの README、図を検査します。
 
@@ -272,6 +273,7 @@ HYDRA-UMC-HIL-BRIDGE/
 │   ├── certificate.rs                           署名付きインターロック証明書（ed25519）
 │   ├── interlock.rs limits.rs                   インターロック規則と URDF の関節制限
 │   ├── server.rs                                HTTP API、ワーカー、ウォッチドッグ
+│   ├── collision_shadow.rs                      ツインに衝突予測をシャドウで問い合わせる
 │   ├── watchdog.rs                              リース切れで関節を停止
 │   ├── access.rs audit.rs                       Bearer トークンと監査リング
 │   └── protocol.rs main.rs                      メッセージ形式、CLI、起動

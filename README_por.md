@@ -18,7 +18,7 @@ GPL-3.0-or-later - see LICENSE
   <img src="https://img.shields.io/badge/License-GPL%203.0--or--later-blue.svg" alt="GPL 3.0 or later">
   <img src="https://img.shields.io/badge/Rust-2021-DEA584.svg" alt="Rust">
   <img src="https://img.shields.io/badge/Safety-Interlock-gated-red.svg" alt="Safety">
-  <img src="https://img.shields.io/badge/Tests-115%20passing-2ea44f.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-139%20passing-2ea44f.svg" alt="Tests">
   <img src="https://img.shields.io/badge/Version-0.1.1-0f6cbd.svg" alt="Version">
   <img src="https://img.shields.io/badge/Maturity-functional-0F6CBD.svg" alt="Maturity">
 </p>
@@ -35,7 +35,7 @@ GPL-3.0-or-later - see LICENSE
 |---|---|
 | Versão | `0.1.1` |
 | Maturidade | Funcional |
-| Testes | 115 (`cargo test`) |
+| Testes | 139 (`cargo test`) |
 | Tecnologia | Rust / hardware-in-the-loop I/O |
 | Destino | O Raspberry Pi CM5 de uma célula HYDRA-UMC |
 | Em hardware real | Só simulado: testado com emuladores, dublês de teste ou simuladores; não há registo de execução em hardware real para esta versão |
@@ -51,7 +51,7 @@ Cada linha é uma parte deste repositório e a luz diz até onde chega hoje. É 
 | Área | Estado | O que significa aqui |
 |---|---|---|
 | Software | 🟡 | Funciona para o seu propósito principal; a verificação de honestidade acima lista o que ainda falta |
-| Testes | 🟢 | 115 testes automáticos, executados a cada alteração |
+| Testes | 🟢 | 139 testes automáticos, executados a cada alteração |
 | Hardware real | 🟠 | Só simulado: testado com emuladores, dublês de teste ou simuladores; não há registo de execução em hardware real para esta versão |
 | Documentação | 🟢 | README em oito idiomas, verificado contra o manifesto a cada alteração |
 
@@ -107,6 +107,7 @@ flowchart LR
 * 🔏 **Os comandos reais são certificados pelo gémeo, e cada ordem fica registada:** no modo `real`, o relatório que deixa passar um comando já não é o que escreve quem chama. O pedido leva `certificate`, um relatório de risco assinado com a chave Ed25519 do HYDRA-UMC-TWIN para exatamente essa articulação e posição; o bridge só tem a chave pública (`--twin-public-key-file`) e recusa um certificado forjado, de outro comando, com mais de 2 s (`--certificate-max-age-ms`) ou já usado. Sem chave configurada, o modo real bloqueia todos os comandos; `--allow-unsigned-risk` (só para a bancada, anunciado em cada arranque) volta a acreditar no relatório de quem chama. Cada ordem real é registada (quem chama por `X-Hydra-Caller`, o endereço do par, se o token Bearer foi apresentado, o certificado e o resultado) antes de ser decidida: com `--audit-log FICHEIRO` é acrescentada a um ficheiro e, se o registo não puder ser escrito, a ordem é recusada; `GET /audit` lista as últimas. Um vetor de teste fixo, verificado com uma implementação independente da RFC 8032, é validado pelos dois repositórios. *(implementado, experimentado com o binário real do gémeo; nunca com hardware)*
 * ⏱️ **Um comando real é um prazo, e a ponte para a articulação por si própria quando ele termina:** o comando traz `issued_at_ms`, `valid_for_ms` (no máximo 1000 ms, `--max-valid-for-ms`) e um `seq`; o que está caducado, vem do futuro, dura demasiado ou não é mais recente do que o último da sua articulação é bloqueado antes de gastar o certificado. Se não chegar um comando válido mais recente antes do fim do prazo, o vigilante para a articulação, regista-o na auditoria e conta-o em `GET /stats`, esteja o produtor vivo ou não. Os comandos reais sem janela são recusados, salvo com `--allow-undated-commands` (anunciado em cada arranque). *(implementado contra o recetor que apenas regista, ainda sem transporte; nunca contra hardware)*
 * 📐 **As articulações e os intervalos do robô vêm do seu URDF, e os pedidos são atendidos por vários fios:** `serve --urdf FICHEIRO` bloqueia um comando real para uma articulação que o URDF não tem, uma fixa ou uma posição fora do seu `<limit>` antes de o certificado ser gasto (`outsideLimits` em `GET /stats`); com `serve --workers N` (8 por omissão) um cliente que envia meio pedido ocupa um fio e não a ponte, e as ordens reais continuam a ser decididas uma de cada vez. *(implementado; nunca contra hardware)*
+* 🚧 **Previsão de colisão do gémeo, consultada em sombra (desligada por defeito):** com `serve --collision-shadow` (e `--twin-url`) a ponte pergunta ao gémeo, depois de cada ordem real entregue, se prevê um contacto com uma zona ou com o próprio robô, e regista a resposta no registo de auditoria, em `GET /stats` e no cabeçalho `X-Collision-Shadow`. Só informa: nunca bloqueia uma ordem nem altera a decisão do interbloqueio, e um gémeo que não responde fica `failed`, nunca `clear`. Não experimentado com um robô real.
 * 🌉 **Ponte bidirecional (v0, ainda sem transporte):** existem o encaminhamento real por modo (Real/Simulação) e o espelhamento incondicional real; ainda não há ligação gRPC/WebSocket real a um HYDRA-UMC-TWIN ou controlador HYDRA-UMC verdadeiros.
 * ⚡ **Espelhamento de latência zero (parcial):** o subcomando real `mirror` sombreia hoje um comando num sumidouro de registo; a "latência zero" por uma ligação de rede real continua a ser trabalho futuro.
 * 📡 **Protocolo unificado (planeado):** usa gRPC para sincronização local de alta velocidade e WebSockets para monitorização remota - ainda não há transporte de rede ligado, de propósito (veja `Cargo.toml`).
@@ -161,7 +162,7 @@ cargo run --release -- serve --port 8113 --token-file token.txt   # real mode al
 
 ## 🧪 Testes
 
-115 testes Rust correm com `cargo test`; estão dentro dos módulos de `src/`. Não precisam de hardware nem de rede.
+139 testes Rust correm com `cargo test`; estão dentro dos módulos de `src/`. Não precisam de hardware nem de rede.
 
 A CI executa `HYDRA_UMC_CI=1 python tools/ci_validate.py`, que verifica o manifesto, os documentos, os oito README e as imagens.
 
@@ -250,6 +251,7 @@ HYDRA-UMC-HIL-BRIDGE/
 │   ├── certificate.rs                           o certificado de interbloqueio assinado (ed25519)
 │   ├── interlock.rs limits.rs                   regras de interbloqueio e limites de articulação URDF
 │   ├── server.rs                                a API HTTP, workers e o fio de vigilância
+│   ├── collision_shadow.rs                      pede ao gémeo uma previsão de colisão, em sombra
 │   ├── watchdog.rs                              pára uma articulação quando o seu lease expira
 │   ├── access.rs audit.rs                       token Bearer e o anel de auditoria
 │   └── protocol.rs main.rs                      formas de mensagem, CLI e arranque

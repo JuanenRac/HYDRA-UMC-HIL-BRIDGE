@@ -162,6 +162,12 @@ struct Stats {
     twin_report_failures: u64,
     /// Whether the last report to the twin arrived (None: none was tried yet or no twin is configured).
     twin_in_sync: Option<bool>,
+    /// The collision prediction asked of the twin in shadow (see `collision_shadow.rs`): answered, with a contact predicted, and failed.
+    shadow_predictions: u64,
+    shadow_would_block: u64,
+    shadow_failures: u64,
+    /// The last shadow answer: "clear", "collision" or "failed" (None: none was asked yet).
+    shadow_last: Option<&'static str>,
 }
 
 /// How the interlock of the real mode is certified. The default trusts no twin and accepts no unsigned report: a real command is blocked
@@ -190,6 +196,9 @@ pub struct ServerConfig {
     pub workers: usize,
     /// Where the position of the real joints is reported (`--twin-url`). None: the twin is not told.
     pub twin: Option<std::sync::Arc<dyn TwinStateSink>>,
+    /// `--collision-shadow`: after a real command is delivered, ask the twin whether it predicts a contact. Information only, it never blocks
+    /// anything. Needs the twin link. None: nothing is asked.
+    pub collision_shadow: Option<std::sync::Arc<dyn crate::collision_shadow::CollisionShadow>>,
 }
 
 /// What the bridge itself knows about who sent a request.
@@ -415,6 +424,11 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
                 "twinReports": stats.twin_reports,
                 "twinReportFailures": stats.twin_report_failures,
                 "twinInSync": stats.twin_in_sync,
+                "collisionShadow": config.collision_shadow.is_some(),
+                "shadowPredictions": stats.shadow_predictions,
+                "shadowWouldBlock": stats.shadow_would_block,
+                "shadowFailures": stats.shadow_failures,
+                "shadowLast": stats.shadow_last,
                 "urdfLimits": config.limits.as_ref().map(|l| l.len()),
                 "workers": if config.workers == 0 { DEFAULT_WORKERS } else { config.workers },
             })
@@ -506,7 +520,13 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
             match pending {
                 Some(report) => {
                     let outcome = report_to_twin(shared, &report, &info);
-                    reply.with("X-Twin-Report", outcome.kind())
+                    let mut reply = reply.with("X-Twin-Report", outcome.kind());
+                    // then, if asked for, what the twin predicts for the joint that just moved (information only)
+                    if let Some(shadow) = &config.collision_shadow {
+                        let asked = shadow_collision(shared, shadow.as_ref(), &report, &info);
+                        reply = reply.with("X-Collision-Shadow", asked.kind());
+                    }
+                    reply
                 }
                 None => reply,
             }
@@ -836,6 +856,63 @@ fn report_to_twin(shared: &Shared, report: &JointStateReport, info: &RequestInfo
             state.stats.audit_failures += 1;
             eprintln!("[hil-bridge] audit failure for a twin report: {e}");
         }
+    }
+    outcome
+}
+
+/// Asks the twin what it predicts for the command that just went (outside the lock), counts the answer and leaves an audit record. Nothing
+/// here can change what happened to the command or what happens to the next one.
+fn shadow_collision(
+    shared: &Shared,
+    shadow: &dyn crate::collision_shadow::CollisionShadow,
+    report: &JointStateReport,
+    info: &RequestInfo,
+) -> crate::collision_shadow::ShadowOutcome {
+    use crate::collision_shadow::ShadowOutcome;
+    let outcome = crate::collision_shadow::ask(shadow, &report.joint, report.position);
+    let mut state = shared.lock();
+    state.stats.shadow_last = Some(outcome.kind());
+    let reason = match &outcome {
+        ShadowOutcome::Answered(verdict) => {
+            state.stats.shadow_predictions += 1;
+            if verdict.collision {
+                state.stats.shadow_would_block += 1;
+                eprintln!(
+                    "[hil-bridge] shadow: the twin predicts a contact for joint {:?} at {} ({}); the command was not blocked",
+                    report.joint,
+                    report.position,
+                    verdict.summary()
+                );
+            }
+            Some(verdict.summary())
+        }
+        ShadowOutcome::Failed { reason } => {
+            state.stats.shadow_failures += 1;
+            eprintln!(
+                "[hil-bridge] shadow: the twin gave no prediction for joint {:?}: {reason}",
+                report.joint
+            );
+            Some(reason.clone())
+        }
+    };
+    let entry = AuditEntry {
+        at_ms: now_ms(),
+        phase: "collision_shadow",
+        caller: info.caller.clone(),
+        peer: info.peer.clone(),
+        authenticated: info.authenticated,
+        mode: "real",
+        joint: report.joint.clone(),
+        position: report.position,
+        certificate_key_id: None,
+        certificate_nonce: None,
+        kind: Some(outcome.kind()),
+        delivered: None,
+        reason,
+    };
+    if let Err(e) = state.audit.record(entry) {
+        state.stats.audit_failures += 1;
+        eprintln!("[hil-bridge] audit failure for a shadow prediction: {e}");
     }
     outcome
 }
@@ -2169,5 +2246,151 @@ Content-Length: 500
         assert_eq!(status, 200);
         assert!(resp.contains("\"reported\":false"), "{resp}");
         assert_eq!(stats_json(port)["twinInSync"], false);
+    }
+
+    // ---- the collision prediction asked in shadow (see collision_shadow.rs) ----
+
+    fn shadow_config(
+        twin: &std::sync::Arc<crate::twin_link::RecordingStateSink>,
+        shadow: &std::sync::Arc<crate::collision_shadow::ScriptedShadow>,
+    ) -> ServerConfig {
+        let shadow: std::sync::Arc<dyn crate::collision_shadow::CollisionShadow> = shadow.clone();
+        ServerConfig {
+            collision_shadow: Some(shadow),
+            ..twin_config(twin)
+        }
+    }
+
+    /// The raw answer of a POST, headers included.
+    fn post_full(port: u16, path: &str, body: &str) -> String {
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect must succeed");
+        let request = format!(
+            "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        stream.write_all(request.as_bytes()).unwrap();
+        let mut raw = String::new();
+        stream.read_to_string(&mut raw).unwrap();
+        raw
+    }
+
+    #[test]
+    fn characterization_without_the_shadow_nothing_is_asked_and_the_reply_is_as_before() {
+        let sink = std::sync::Arc::new(crate::twin_link::RecordingStateSink::connected());
+        let port = start_with(twin_config(&sink));
+        let raw = post_full(
+            port,
+            "/route",
+            &route_body("real", Some(&fresh_certificate(NONCE_A))),
+        );
+        assert!(raw.contains("SentReal"), "{raw}");
+        assert!(
+            raw.to_ascii_lowercase()
+                .contains("x-twin-report: delivered"),
+            "{raw}"
+        );
+        assert!(
+            !raw.to_ascii_lowercase().contains("x-collision-shadow"),
+            "{raw}"
+        );
+        let stats = stats_json(port);
+        assert_eq!(stats["collisionShadow"], false);
+        assert_eq!(stats["shadowPredictions"], 0);
+        assert_eq!(stats["shadowLast"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn a_predicted_contact_is_recorded_and_never_blocks_the_command() {
+        let twin = std::sync::Arc::new(crate::twin_link::RecordingStateSink::connected());
+        let shadow = std::sync::Arc::new(crate::collision_shadow::ScriptedShadow::answering(true));
+        let port = start_with(shadow_config(&twin, &shadow));
+        let raw = post_full(
+            port,
+            "/route",
+            &route_body("real", Some(&fresh_certificate(NONCE_A))),
+        );
+        // the command went, exactly as it would without the shadow
+        assert!(raw.contains("SentReal"), "{raw}");
+        assert!(
+            raw.to_ascii_lowercase().contains("x-delivered: true"),
+            "{raw}"
+        );
+        assert!(
+            raw.to_ascii_lowercase()
+                .contains("x-collision-shadow: collision"),
+            "{raw}"
+        );
+        assert_eq!(shadow.questions(), vec![("shoulder".to_string(), 1.0)]);
+        let stats = stats_json(port);
+        assert_eq!(stats["routedReal"], 1);
+        assert_eq!(stats["blockedByInterlock"], 0);
+        assert_eq!(stats["collisionShadow"], true);
+        assert_eq!(stats["shadowPredictions"], 1);
+        assert_eq!(stats["shadowWouldBlock"], 1);
+        assert_eq!(stats["shadowLast"], "collision");
+        let (_, audit) = get_with(port, "/audit", "");
+        assert!(audit.contains("collision_shadow"), "{audit}");
+        assert!(audit.contains("danger"), "{audit}");
+        // a second command is decided as if the shadow did not exist
+        let raw = post_full(
+            port,
+            "/route",
+            &route_body("real", Some(&fresh_certificate(NONCE_B))),
+        );
+        assert!(raw.contains("SentReal"), "{raw}");
+    }
+
+    #[test]
+    fn a_clear_answer_is_counted_as_clear() {
+        let twin = std::sync::Arc::new(crate::twin_link::RecordingStateSink::connected());
+        let shadow = std::sync::Arc::new(crate::collision_shadow::ScriptedShadow::answering(false));
+        let port = start_with(shadow_config(&twin, &shadow));
+        let raw = post_full(
+            port,
+            "/route",
+            &route_body("real", Some(&fresh_certificate(NONCE_A))),
+        );
+        assert!(
+            raw.to_ascii_lowercase()
+                .contains("x-collision-shadow: clear"),
+            "{raw}"
+        );
+        let stats = stats_json(port);
+        assert_eq!(stats["shadowPredictions"], 1);
+        assert_eq!(stats["shadowWouldBlock"], 0);
+        assert_eq!(stats["shadowLast"], "clear");
+    }
+
+    #[test]
+    fn a_twin_that_gives_no_prediction_is_a_failure_and_never_read_as_clear() {
+        let twin = std::sync::Arc::new(crate::twin_link::RecordingStateSink::connected());
+        let shadow = std::sync::Arc::new(crate::collision_shadow::ScriptedShadow::failing());
+        let port = start_with(shadow_config(&twin, &shadow));
+        let raw = post_full(
+            port,
+            "/route",
+            &route_body("real", Some(&fresh_certificate(NONCE_A))),
+        );
+        assert!(raw.contains("SentReal"), "{raw}");
+        assert!(
+            raw.to_ascii_lowercase()
+                .contains("x-collision-shadow: failed"),
+            "{raw}"
+        );
+        let stats = stats_json(port);
+        assert_eq!(stats["shadowFailures"], 1);
+        assert_eq!(stats["shadowPredictions"], 0);
+        assert_eq!(stats["shadowLast"], "failed");
+    }
+
+    #[test]
+    fn a_blocked_command_and_a_simulated_one_are_not_asked_about() {
+        let twin = std::sync::Arc::new(crate::twin_link::RecordingStateSink::connected());
+        let shadow = std::sync::Arc::new(crate::collision_shadow::ScriptedShadow::answering(true));
+        let port = start_with(shadow_config(&twin, &shadow));
+        post_with(port, "/route", "", &route_body("real", None));
+        post_with(port, "/route", "", &route_body("simulation", None));
+        assert!(shadow.questions().is_empty());
+        assert_eq!(stats_json(port)["shadowPredictions"], 0);
     }
 }

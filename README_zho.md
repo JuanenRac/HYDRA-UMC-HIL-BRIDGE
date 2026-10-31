@@ -18,7 +18,7 @@ GPL-3.0-or-later - see LICENSE
   <img src="https://img.shields.io/badge/License-GPL%203.0--or--later-blue.svg" alt="GPL 3.0 or later">
   <img src="https://img.shields.io/badge/Rust-2021-DEA584.svg" alt="Rust">
   <img src="https://img.shields.io/badge/Safety-Interlock-gated-red.svg" alt="Safety">
-  <img src="https://img.shields.io/badge/Tests-115%20passing-2ea44f.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-139%20passing-2ea44f.svg" alt="Tests">
   <img src="https://img.shields.io/badge/Version-0.1.1-0f6cbd.svg" alt="Version">
   <img src="https://img.shields.io/badge/Maturity-functional-0F6CBD.svg" alt="Maturity">
 </p>
@@ -35,7 +35,7 @@ GPL-3.0-or-later - see LICENSE
 |---|---|
 | 版本 | `0.1.1` |
 | 成熟度 | 可用 |
-| 测试 | 115 (`cargo test`) |
+| 测试 | 139 (`cargo test`) |
 | 技术栈 | Rust / hardware-in-the-loop I/O |
 | 目标 | HYDRA-UMC 工作单元的 Raspberry Pi CM5 |
 | 真实硬件 | 仅模拟：使用模拟器、替身或仿真测试；此版本没有在真实硬件上运行的记录 |
@@ -51,7 +51,7 @@ GPL-3.0-or-later - see LICENSE
 | 领域 | 状态 | 在这里的含义 |
 |---|---|---|
 | 软件 | 🟡 | 主要用途可用；上面的诚实性检查列出了仍然缺少的内容 |
-| 测试 | 🟢 | 115 项自动测试，每次变更都会运行 |
+| 测试 | 🟢 | 139 项自动测试，每次变更都会运行 |
 | 真实硬件 | 🟠 | 仅模拟：使用模拟器、替身或仿真测试；此版本没有在真实硬件上运行的记录 |
 | 文档 | 🟢 | 八种语言的 README，每次变更都会与清单核对 |
 
@@ -112,6 +112,7 @@ flowchart LR
 * 🔏 **真实命令由孪生体认证,每条指令都有记录:** 在 `real` 模式下,放行命令的报告不再是调用方自己写的那份。请求携带 `certificate`,即用 HYDRA-UMC-TWIN 的 Ed25519 密钥为恰好该关节和位置签名的风险报告;桥接只持有公钥(`--twin-public-key-file`),会拒绝伪造的、属于另一条命令的、超过 2 秒(`--certificate-max-age-ms`)或已被使用过的证书。未配置密钥时,真实模式会阻止所有命令;`--allow-unsigned-risk`(仅限台架使用,每次启动都会提示)会重新相信调用方的报告。每条真实指令在被裁决之前都会被记录(来自 `X-Hydra-Caller` 的调用方、对端地址、是否出示了 Bearer 令牌、证书和结果):使用 `--audit-log 文件` 时追加到文件,如果记录无法写入则拒绝该指令;`GET /audit` 列出最近的记录。一个固定的测试向量(已用独立的 RFC 8032 实现核对)由两个仓库共同验证。*(已实现,已针对真实的孪生体二进制程序试过;从未针对硬件)*
 * ⏱️ **真实命令是一份限时租约,租约到期时网桥会自行停止该关节:** 命令带有 `issued_at_ms`、`valid_for_ms`(最多 1000 毫秒,`--max-valid-for-ms`)和 `seq`;已过期、来自未来、时间过长或不比该关节上一条更新的命令,会在消耗其证书之前被拦截。若在租约结束前没有更新的有效命令到达,无论生产者是否还活着,看门狗都会停止该关节,写入审计并计入 `GET /stats`。没有时间窗口的真实命令会被拒绝,除非使用 `--allow-undated-commands`(每次启动都会提示)。*(已针对只做记录的接收端实现,尚无传输层;从未在硬件上验证)*
 * 📐 **机器人的关节和范围来自其 URDF,请求由多个工作线程处理:** `serve --urdf 文件` 会在消耗证书之前,拦截针对 URDF 中不存在的关节、固定关节或超出其 `<limit>` 的位置的真实命令(`GET /stats` 中的 `outsideLimits`);使用 `serve --workers N`(默认 8)时,只发送半个请求的客户端只会占用一个工作线程,而不是整个网桥,真实指令仍然逐条判定。*(已实现;从未针对硬件运行)*
+* 🚧 **以影子模式询问孪生体的碰撞预测（默认关闭）：** 使用 `serve --collision-shadow`（以及 `--twin-url`）时，桥接在每次交付真实命令之后，询问孪生体是否预测会与某个区域或机器人自身接触，并把答案记录到审计日志、`GET /stats` 和响应头 `X-Collision-Shadow` 中。它只提供信息：绝不会阻止命令，也不会改变联锁的决定；孪生体没有答复时记为 `failed`，绝不会记为 `clear`。尚未在真实机器人上试验。
 * 🌉 **双向桥接（v0，尚无传输层）：** 真实的、基于模式（真实/仿真）的路由和真实的、无条件的镜像已经存在；目前还没有连接到真正的 HYDRA-UMC-TWIN 或 HYDRA-UMC 控制器的真实 gRPC/WebSocket 连接。
 * ⚡ **零延迟镜像（部分）：** 真实的 `mirror` 子命令今天会把指令镜像到一个内存中的记录接收器；在真实网络连接上的"零延迟"仍是未来工作。
 * 📡 **统一协议（计划中）：** 使用 gRPC 进行高速本地同步，使用 WebSocket 进行远程监控——目前故意还没有接入任何网络传输层（见 `Cargo.toml`）。
@@ -166,7 +167,7 @@ cargo run --release -- serve --port 8113 --token-file token.txt   # real mode al
 
 ## 🧪 测试
 
-运行 `cargo test` 会执行 115 个 Rust 测试，它们位于 `src/` 的模块内，不需要硬件和网络。
+运行 `cargo test` 会执行 139 个 Rust 测试，它们位于 `src/` 的模块内，不需要硬件和网络。
 
 CI 运行 `HYDRA_UMC_CI=1 python tools/ci_validate.py`，检查清单、文档、八个 README 和图片。
 
@@ -263,6 +264,7 @@ HYDRA-UMC-HIL-BRIDGE/
 │   ├── certificate.rs                           签名的联锁证书（ed25519）
 │   ├── interlock.rs limits.rs                   联锁规则与 URDF 关节限位
 │   ├── server.rs                                HTTP API、工作线程与看门狗线程
+│   ├── collision_shadow.rs                      以影子模式向孪生体询问碰撞预测
 │   ├── watchdog.rs                              租约到期时停止关节
 │   ├── access.rs audit.rs                       Bearer 令牌与审计环
 │   └── protocol.rs main.rs                      消息格式、命令行与启动
