@@ -167,6 +167,9 @@ struct Stats {
     shadow_predictions: u64,
     shadow_would_block: u64,
     shadow_failures: u64,
+    /// Enforced mode: real commands refused because the twin predicted a contact, and because it gave no prediction in time.
+    shadow_blocked: u64,
+    shadow_unavailable: u64,
     /// The last shadow answer: "clear", "collision" or "failed" (None: none was asked yet).
     shadow_last: Option<&'static str>,
 }
@@ -200,6 +203,10 @@ pub struct ServerConfig {
     /// `--collision-shadow`: after a real command is delivered, ask the twin whether it predicts a contact. Information only, it never blocks
     /// anything. Needs the twin link. None: nothing is asked.
     pub collision_shadow: Option<std::sync::Arc<dyn crate::collision_shadow::CollisionShadow>>,
+    /// `--collision-shadow-enforce`: the prediction is asked BEFORE a real command is routed, inside the wait budget of the shadow, and the
+    /// command is refused when the twin predicts a contact or does not answer in time (never sent unchecked). Off by default: the shadow
+    /// then only informs. Needs `collision_shadow`.
+    pub shadow_enforce: bool,
     /// `--sim-robot`: the place the real commands (and the stops of the watchdog) are delivered to is the simulated robot of the twin, not a
     /// recording. The interlock, the certificates, the limits and the watchdog work as they do with a robot; only the robot is a model.
     pub sim_robot: Option<std::sync::Arc<crate::twin_link::TwinSimSink>>,
@@ -435,6 +442,9 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
                 "shadowPredictions": stats.shadow_predictions,
                 "shadowWouldBlock": stats.shadow_would_block,
                 "shadowFailures": stats.shadow_failures,
+                "shadowEnforce": config.shadow_enforce && config.collision_shadow.is_some(),
+                "shadowBlocked": stats.shadow_blocked,
+                "shadowUnavailable": stats.shadow_unavailable,
                 "shadowLast": stats.shadow_last,
                 "urdfLimits": config.limits.as_ref().map(|l| l.len()),
                 "workers": if config.workers == 0 { DEFAULT_WORKERS } else { config.workers },
@@ -563,6 +573,16 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
                     "Shadow predictions that could not be asked.",
                     stats.shadow_failures,
                 ),
+                Series::counter(
+                    "hydra_umc_hil_bridge_shadow_blocked_total",
+                    "Real commands refused because the twin predicted a contact (enforced shadow).",
+                    stats.shadow_blocked,
+                ),
+                Series::counter(
+                    "hydra_umc_hil_bridge_shadow_unavailable_total",
+                    "Real commands refused because the twin gave no prediction in time (enforced shadow).",
+                    stats.shadow_unavailable,
+                ),
             ];
             if let Some(in_sync) = stats.twin_in_sync {
                 series.push(Series::gauge(
@@ -646,44 +666,62 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
             .unwrap_or_else(|| "unknown".to_string()),
         authenticated,
     };
-    let reply = match path.as_str() {
-        "/route" => {
-            let (reply, pending) = {
-                let mut state = shared.lock();
-                let reply = handle_route(
-                    &raw,
-                    &mut state,
-                    &RouteContext {
-                        fault_injection: config.fault_injection,
-                        interlock: &config.interlock,
-                        limits: config.limits.as_ref(),
-                        twin_linked: config.twin.is_some(),
-                        sim_robot: config.sim_robot.as_deref(),
-                    },
-                    &info,
-                );
-                (reply, state.pending_twin.take())
-            };
-            // The twin is told AFTER the lock is released: the call can take as long as its timeout, and the command already went.
-            match pending {
-                Some(report) => {
-                    let outcome = report_to_twin(shared, &report, &info);
-                    let mut reply = reply.with("X-Twin-Report", outcome.kind());
-                    // then, if asked for, what the twin predicts for the joint that just moved (information only)
-                    if let Some(shadow) = &config.collision_shadow {
-                        let asked = shadow_collision(shared, shadow.as_ref(), &report, &info);
-                        reply = reply.with("X-Collision-Shadow", asked.kind());
+    // Enforced shadow: the twin is asked before the command is routed (outside the lock); a refusal never reaches the interlock or the robot.
+    let refused_by_shadow = if path == "/route" && config.shadow_enforce {
+        config
+            .collision_shadow
+            .as_ref()
+            .and_then(|shadow| shadow_precheck(shared, shadow.as_ref(), &raw, &info))
+    } else {
+        None
+    };
+    let reply = if let Some(refused) = refused_by_shadow {
+        refused
+    } else {
+        match path.as_str() {
+            "/route" => {
+                let (reply, pending) = {
+                    let mut state = shared.lock();
+                    let reply = handle_route(
+                        &raw,
+                        &mut state,
+                        &RouteContext {
+                            fault_injection: config.fault_injection,
+                            interlock: &config.interlock,
+                            limits: config.limits.as_ref(),
+                            twin_linked: config.twin.is_some(),
+                            sim_robot: config.sim_robot.as_deref(),
+                        },
+                        &info,
+                    );
+                    (reply, state.pending_twin.take())
+                };
+                // The twin is told AFTER the lock is released: the call can take as long as its timeout, and the command already went.
+                match pending {
+                    Some(report) => {
+                        let outcome = report_to_twin(shared, &report, &info);
+                        let mut reply = reply.with("X-Twin-Report", outcome.kind());
+                        // then, if asked for, what the twin predicts for the joint that just moved (information only)
+                        // (with the shadow enforced the twin was already asked before the command went)
+                        if let Some(shadow) = config
+                            .collision_shadow
+                            .as_ref()
+                            .filter(|_| !config.shadow_enforce)
+                        {
+                            let asked = shadow_collision(shared, shadow.as_ref(), &report, &info);
+                            reply = reply.with("X-Collision-Shadow", asked.kind());
+                        }
+                        reply
                     }
-                    reply
+                    None => reply,
                 }
-                None => reply,
             }
-        }
-        "/measured" => handle_measured(&raw, shared, &info),
-        "/mirror" => handle_mirror(&raw, &mut shared.lock().stats),
-        _ => {
-            shared.lock().stats.not_found += 1;
-            Reply::json(404, json!({"error": "not found"}))
+            "/measured" => handle_measured(&raw, shared, &info),
+            "/mirror" => handle_mirror(&raw, &mut shared.lock().stats),
+            _ => {
+                shared.lock().stats.not_found += 1;
+                Reply::json(404, json!({"error": "not found"}))
+            }
         }
     };
     reply.send(request);
@@ -1068,6 +1106,95 @@ fn shadow_collision(
         eprintln!("[hil-bridge] audit failure for a shadow prediction: {e}");
     }
     outcome
+}
+
+/// Enforced shadow: asks the twin about a real command BEFORE it is routed. `None` lets the command go on to the interlock (not a real command
+/// we can read, or the twin predicts no contact); `Some(reply)` refuses it: `409` for a predicted contact, `503` when the twin gave no prediction
+/// inside the wait budget. A command is never sent unchecked while the shadow is enforced.
+fn shadow_precheck(
+    shared: &Shared,
+    shadow: &dyn crate::collision_shadow::CollisionShadow,
+    raw: &str,
+    info: &RequestInfo,
+) -> Option<Reply> {
+    use crate::collision_shadow::ShadowOutcome;
+    let value: serde_json::Value = serde_json::from_str(raw).ok()?;
+    if value.get("mode").and_then(serde_json::Value::as_str) != Some("real") {
+        return None;
+    }
+    let joint = value.get("joint").and_then(serde_json::Value::as_str)?;
+    let position = value
+        .get("position")
+        .and_then(serde_json::Value::as_f64)
+        .filter(|p| p.is_finite())?;
+    let outcome = crate::collision_shadow::ask(shadow, joint, position);
+    let mut state = shared.lock();
+    state.stats.shadow_last = Some(outcome.kind());
+    let (refusal, reason, kind) = match &outcome {
+        ShadowOutcome::Answered(verdict) => {
+            state.stats.shadow_predictions += 1;
+            if verdict.collision {
+                state.stats.shadow_would_block += 1;
+                state.stats.shadow_blocked += 1;
+                eprintln!(
+                    "[hil-bridge] shadow: command for joint {joint:?} at {position} refused, the twin predicts a contact ({})",
+                    verdict.summary()
+                );
+                (
+                    Some(Reply::json(
+                        409,
+                        json!({
+                            "error": "the twin predicts a contact for this command, so it was not sent",
+                            "blockedBy": "collision_shadow",
+                            "twin": verdict.summary(),
+                        }),
+                    )),
+                    verdict.summary(),
+                    "shadow_blocked",
+                )
+            } else {
+                (None, verdict.summary(), "clear")
+            }
+        }
+        ShadowOutcome::Failed { reason } => {
+            state.stats.shadow_failures += 1;
+            state.stats.shadow_unavailable += 1;
+            eprintln!(
+                "[hil-bridge] shadow: command for joint {joint:?} refused, the twin gave no prediction in time: {reason}"
+            );
+            (
+                Some(Reply::json(
+                    503,
+                    json!({
+                        "error": "the twin gave no collision prediction in time, so the command was not sent",
+                        "blockedBy": "collision_shadow_unavailable",
+                    }),
+                )),
+                reason.clone(),
+                "shadow_unavailable",
+            )
+        }
+    };
+    let entry = AuditEntry {
+        at_ms: now_ms(),
+        phase: "collision_shadow",
+        caller: info.caller.clone(),
+        peer: info.peer.clone(),
+        authenticated: info.authenticated,
+        mode: "real",
+        joint: joint.to_string(),
+        position,
+        certificate_key_id: None,
+        certificate_nonce: None,
+        kind: Some(kind),
+        delivered: refusal.is_some().then_some(false),
+        reason: Some(reason),
+    };
+    if let Err(e) = state.audit.record(entry) {
+        state.stats.audit_failures += 1;
+        eprintln!("[hil-bridge] audit failure for a shadow check: {e}");
+    }
+    refusal
 }
 
 /// `POST /measured`: the controller read a joint back; tell the twin where it really is. Not gated by the interlock (it is observation),
@@ -2577,5 +2704,100 @@ Content-Length: 500
         post_with(port, "/route", "", &route_body("simulation", None));
         assert!(shadow.questions().is_empty());
         assert_eq!(stats_json(port)["shadowPredictions"], 0);
+    }
+
+    // ---- the shadow enforced: the twin is asked before the command is routed ----
+
+    fn enforced_config(
+        twin: &std::sync::Arc<crate::twin_link::RecordingStateSink>,
+        shadow: &std::sync::Arc<crate::collision_shadow::ScriptedShadow>,
+    ) -> ServerConfig {
+        ServerConfig {
+            shadow_enforce: true,
+            ..shadow_config(twin, shadow)
+        }
+    }
+
+    #[test]
+    fn an_enforced_shadow_refuses_a_command_the_twin_predicts_a_contact_for() {
+        let twin = std::sync::Arc::new(crate::twin_link::RecordingStateSink::connected());
+        let shadow = std::sync::Arc::new(crate::collision_shadow::ScriptedShadow::answering(true));
+        let port = start_with(enforced_config(&twin, &shadow));
+        let raw = post_full(
+            port,
+            "/route",
+            &route_body("real", Some(&fresh_certificate(NONCE_A))),
+        );
+        assert!(raw.starts_with("HTTP/1.1 409"), "{raw}");
+        assert!(raw.contains("collision_shadow"), "{raw}");
+        assert!(!raw.contains("SentReal"), "{raw}");
+        // nothing reached the robot, the certificate was not used up and the twin was told nothing
+        let stats = stats_json(port);
+        assert_eq!(stats["routedReal"], 0);
+        assert_eq!(stats["shadowEnforce"], true);
+        assert_eq!(stats["shadowBlocked"], 1);
+        assert_eq!(stats["shadowUnavailable"], 0);
+        assert_eq!(shadow.questions(), vec![("shoulder".to_string(), 1.0)]);
+        let (_, audit) = get_with(port, "/audit", "");
+        assert!(audit.contains("shadow_blocked"), "{audit}");
+        assert!(
+            !audit.contains("\"phase\":\"order\""),
+            "a refused command is not an order that went: {audit}"
+        );
+    }
+
+    #[test]
+    fn an_enforced_shadow_lets_a_clear_command_through_and_asks_only_once() {
+        let twin = std::sync::Arc::new(crate::twin_link::RecordingStateSink::connected());
+        let shadow = std::sync::Arc::new(crate::collision_shadow::ScriptedShadow::answering(false));
+        let port = start_with(enforced_config(&twin, &shadow));
+        let raw = post_full(
+            port,
+            "/route",
+            &route_body("real", Some(&fresh_certificate(NONCE_A))),
+        );
+        assert!(raw.contains("SentReal"), "{raw}");
+        assert_eq!(shadow.questions().len(), 1, "asked before, not again after");
+        let stats = stats_json(port);
+        assert_eq!(stats["routedReal"], 1);
+        assert_eq!(stats["shadowBlocked"], 0);
+        assert_eq!(stats["shadowPredictions"], 1);
+    }
+
+    #[test]
+    fn an_enforced_shadow_never_sends_a_command_the_twin_could_not_check() {
+        let twin = std::sync::Arc::new(crate::twin_link::RecordingStateSink::connected());
+        let shadow = std::sync::Arc::new(crate::collision_shadow::ScriptedShadow::failing());
+        let port = start_with(enforced_config(&twin, &shadow));
+        let raw = post_full(
+            port,
+            "/route",
+            &route_body("real", Some(&fresh_certificate(NONCE_A))),
+        );
+        assert!(raw.starts_with("HTTP/1.1 503"), "{raw}");
+        assert!(raw.contains("collision_shadow_unavailable"), "{raw}");
+        let stats = stats_json(port);
+        assert_eq!(stats["routedReal"], 0);
+        assert_eq!(stats["shadowUnavailable"], 1);
+        assert_eq!(stats["shadowBlocked"], 0);
+    }
+
+    #[test]
+    fn an_enforced_shadow_does_not_ask_about_simulation_or_a_body_it_cannot_read() {
+        let twin = std::sync::Arc::new(crate::twin_link::RecordingStateSink::connected());
+        let shadow = std::sync::Arc::new(crate::collision_shadow::ScriptedShadow::answering(true));
+        let port = start_with(enforced_config(&twin, &shadow));
+        post_with(port, "/route", "", &route_body("simulation", None));
+        post_with(port, "/route", "", "{");
+        assert!(shadow.questions().is_empty());
+        assert_eq!(stats_json(port)["shadowBlocked"], 0);
+    }
+
+    #[test]
+    fn without_enforcement_the_shadow_still_only_informs() {
+        let twin = std::sync::Arc::new(crate::twin_link::RecordingStateSink::connected());
+        let shadow = std::sync::Arc::new(crate::collision_shadow::ScriptedShadow::answering(true));
+        let port = start_with(shadow_config(&twin, &shadow));
+        assert_eq!(stats_json(port)["shadowEnforce"], false);
     }
 }

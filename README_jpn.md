@@ -18,7 +18,7 @@ GPL-3.0-or-later - see LICENSE
   <img src="https://img.shields.io/badge/License-GPL%203.0--or--later-blue.svg" alt="GPL 3.0 or later">
   <img src="https://img.shields.io/badge/Rust-2021-DEA584.svg" alt="Rust">
   <img src="https://img.shields.io/badge/Safety-Interlock-gated-red.svg" alt="Safety">
-  <img src="https://img.shields.io/badge/Tests-144%20passing-2ea44f.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-149%20passing-2ea44f.svg" alt="Tests">
   <img src="https://img.shields.io/badge/Version-0.1.3-0f6cbd.svg" alt="Version">
   <img src="https://img.shields.io/badge/Maturity-functional-0F6CBD.svg" alt="Maturity">
 </p>
@@ -35,7 +35,7 @@ GPL-3.0-or-later - see LICENSE
 |---|---|
 | バージョン | `0.1.3` |
 | 成熟度 | 機能する |
-| テスト | 144 (`cargo test`) |
+| テスト | 149 (`cargo test`) |
 | 技術 | Rust / hardware-in-the-loop I/O |
 | 対象 | HYDRA-UMC セルの Raspberry Pi CM5 |
 | 実機での確認 | シミュレーションのみ：エミュレーター、模擬部品、シミュレーターで試験済み。このバージョンについて実機での動作記録はありません |
@@ -51,7 +51,7 @@ GPL-3.0-or-later - see LICENSE
 | 領域 | 状態 | ここでの意味 |
 |---|---|---|
 | ソフトウェア | 🟡 | 主な目的では動作します。足りない点は上の正直さの確認に書かれています |
-| テスト | 🟢 | 自動テスト 144 件。変更のたびに実行されます |
+| テスト | 🟢 | 自動テスト 149 件。変更のたびに実行されます |
 | 実機 | 🟠 | シミュレーションのみ：エミュレーター、模擬部品、シミュレーターで試験済み。このバージョンについて実機での動作記録はありません |
 | ドキュメント | 🟢 | 8 言語の README。変更のたびにマニフェストと照合されます |
 
@@ -120,6 +120,7 @@ flowchart LR
 * 📡 **統一プロトコル（計画中）：** 高速なローカル同期には gRPC を、リモート監視には WebSocket を使用します——意図的に、まだどのネットワークトランスポートも接続されていません（`Cargo.toml` を参照）。
 * 🧪 **ハードウェアなしでテスト可能なフェイルセーフ・トランスポート（v0）：** `CommandSink::send()` は今では実際の `Result` を返し、`SimulatedTransport` はタイムアウトまたは切断されたリンクをモデル化できます。ブリッジはコマンドが実際には届いていないのに届いたと主張することは決してなく、独立した `TransportFailure` という結果を報告します——`route` の `--transport-latency-ms`/`--transport-timeout-ms`/`--transport-disconnected` で実際に発生させて確認できます。
 * 🌐 **HTTP JSON API（v0）：** `serve [--addr ADDR] [--port PORT]`（デフォルト `127.0.0.1:8113`）は、同じルーティング/ミラーリングロジックを実際のブロッキング `tiny_http` サーバー経由で `POST /route`、`POST /mirror`、`GET /stats` として公開します——デプロイされた CM5 の `systemd/hydra-umc-hil-bridge.service` ユニットが実行するのと同じバイナリです（ループバックのみ）。完全なリクエスト/レスポンス契約は [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) を参照してください。
+* 🚧 **衝突シャドウを強制できる（既定ではオフ）：** `--collision-shadow-enforce` を付けると、実機コマンドをルーティングする前に、`--collision-shadow-timeout-ms` の待ち時間内でツインに問い合わせます。接触が予測されればコマンドは拒否され（`409`）、時間内に応答がない場合も拒否されます（`503`）。確認なしでコマンドが送られることはありません。シミュレーションのコマンドは問い合わせません。実ロボットでは未検証です。
 
 **正直な現状確認 —— 今日実際に動くもの：** `route --mode real|simulation --joint 名前 --position 値 [--collision-risk] [--distance メートル] [--transport-latency-ms MS] [--transport-timeout-ms MS] [--transport-disconnected]` は実際のルーティング判断を行います——`simulation` モードは常に送信し、`real` モードは ツインのリスクレポートが無い場合、`--collision-risk` が指定された場合、距離が NaN の場合、または余裕が 5 cm 未満の場合にコマンドをブロックする実際の安全インターロック（`--clear-distance メートル` で安全なレポートを渡せます）の対象になります。`mirror --joint 名前 --position 値` はコマンドを無条件にミラーリングします。`serve` は、一度きりの CLI 呼び出しの代わりに、両方を実際の HTTP JSON 経由でも公開します。3つとも既定ではメモリ内の受信先（`RecordingSink`、実際のコントローラーや実際の HYDRA-UMC-TWIN インスタンスではない）へルーティングされ、上記のトランスポートフラグが渡された場合は実際に失敗しうる（タイムアウト/切断）`SimulatedTransport` へルーティングされます——まだ gRPC/WebSocket トランスポートは存在しません。実際に出荷済みの内容は [`CHANGELOG.md`](CHANGELOG.md) を、すべてのコマンド/エンドポイントは [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) を、まだ残っている作業は下記のロードマップを参照してください。
 
@@ -169,7 +170,7 @@ cargo run --release -- serve --port 8113 --token-file token.txt   # real mode al
 
 ## 🧪 テスト
 
-`cargo test` で Rust のテスト 144 件を実行します。テストは `src/` のモジュール内にあり、ハードウェアもネットワークも不要です。
+`cargo test` で Rust のテスト 149 件を実行します。テストは `src/` のモジュール内にあり、ハードウェアもネットワークも不要です。
 
 CI は `HYDRA_UMC_CI=1 python tools/ci_validate.py` を実行し、マニフェスト、文書、8 つの README、図を検査します。
 

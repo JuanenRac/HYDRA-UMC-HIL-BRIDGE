@@ -288,6 +288,9 @@ Off by default. With `--collision-shadow` (it needs `--twin-url` and its token, 
 |---|---|
 | `--collision-shadow` | Ask the twin. Without it nothing is asked and `POST /route` answers as before. |
 | `--collision-shadow-timeout-ms N` | Connect, write and read limit of one question, 10 to 10000 (default 1000). Needs `--collision-shadow`. |
+| `--collision-shadow-enforce` | Ask BEFORE a real command is routed and refuse it on a predicted contact (`409`) or when the twin gave no answer inside the limit above (`503`). Needs `--collision-shadow`. |
+
+With `--collision-shadow-enforce` the shadow stops being only informative: the question is asked before the command reaches the interlock, so the wait of `--collision-shadow-timeout-ms` is the budget the command can wait. A command that was not checked in time is refused, never sent unchecked. A refusal is `{"error", "blockedBy": "collision_shadow" | "collision_shadow_unavailable"}`, is recorded in the audit log (`shadow_blocked` or `shadow_unavailable`) and does not use up the certificate of the command. `GET /stats` adds `shadowEnforce`, `shadowBlocked` and `shadowUnavailable`; `GET /metrics` the counters `hydra_umc_hil_bridge_shadow_blocked_total` and `hydra_umc_hil_bridge_shadow_unavailable_total`. A command in `simulation` mode, and a body that cannot be read, are not asked about. The question is asked once: with the shadow enforced it is not asked again after the command went.
 
 `GET /stats` adds `collisionShadow`, `shadowPredictions` (answered), `shadowWouldBlock` (answered with a predicted contact), `shadowFailures` and `shadowLast` (`null` until the first question). Simulation mode and blocked commands are never asked about. Not tried with a real robot or a real controller; the prediction is described in the documentation of HYDRA-UMC-TWIN and HYDRA-UMC-PHYSICS-REPLICA.
 

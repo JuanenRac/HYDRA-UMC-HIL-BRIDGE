@@ -18,7 +18,7 @@ GPL-3.0-or-later - see LICENSE
   <img src="https://img.shields.io/badge/License-GPL%203.0--or--later-blue.svg" alt="GPL 3.0 or later">
   <img src="https://img.shields.io/badge/Rust-2021-DEA584.svg" alt="Rust">
   <img src="https://img.shields.io/badge/Safety-Interlock-gated-red.svg" alt="Safety">
-  <img src="https://img.shields.io/badge/Tests-144%20passing-2ea44f.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-149%20passing-2ea44f.svg" alt="Tests">
   <img src="https://img.shields.io/badge/Version-0.1.3-0f6cbd.svg" alt="Version">
   <img src="https://img.shields.io/badge/Maturity-functional-0F6CBD.svg" alt="Maturity">
 </p>
@@ -35,7 +35,7 @@ GPL-3.0-or-later - see LICENSE
 |---|---|
 | 版本 | `0.1.3` |
 | 成熟度 | 可用 |
-| 测试 | 144 (`cargo test`) |
+| 测试 | 149 (`cargo test`) |
 | 技术栈 | Rust / hardware-in-the-loop I/O |
 | 目标 | HYDRA-UMC 工作单元的 Raspberry Pi CM5 |
 | 真实硬件 | 仅模拟：使用模拟器、替身或仿真测试；此版本没有在真实硬件上运行的记录 |
@@ -51,7 +51,7 @@ GPL-3.0-or-later - see LICENSE
 | 领域 | 状态 | 在这里的含义 |
 |---|---|---|
 | 软件 | 🟡 | 主要用途可用；上面的诚实性检查列出了仍然缺少的内容 |
-| 测试 | 🟢 | 144 项自动测试，每次变更都会运行 |
+| 测试 | 🟢 | 149 项自动测试，每次变更都会运行 |
 | 真实硬件 | 🟠 | 仅模拟：使用模拟器、替身或仿真测试；此版本没有在真实硬件上运行的记录 |
 | 文档 | 🟢 | 八种语言的 README，每次变更都会与清单核对 |
 
@@ -118,6 +118,7 @@ flowchart LR
 * 📡 **统一协议（计划中）：** 使用 gRPC 进行高速本地同步，使用 WebSocket 进行远程监控——目前故意还没有接入任何网络传输层（见 `Cargo.toml`）。
 * 🧪 **故障安全传输层，无需硬件即可测试（v0）：** `CommandSink::send()` 现在返回真实的 `Result`；新增的 `SimulatedTransport` 可以模拟超时或断开的链路，桥接服务会报告一个独立的 `TransportFailure` 结果，绝不会在指令实际未送达时声称已送达——可通过 `route` 上的 `--transport-latency-ms`/`--transport-timeout-ms`/`--transport-disconnected` 触发验证。
 * 🌐 **HTTP JSON API（v0）：** `serve [--addr ADDR] [--port PORT]`（默认 `127.0.0.1:8113`）通过一个真实的阻塞式 `tiny_http` 服务器，把同样的路由/镜像逻辑以 `POST /route`、`POST /mirror`、`GET /stats` 的形式对外提供——与部署到 CM5 上的 `systemd/hydra-umc-hil-bridge.service` 单元运行的是同一个二进制文件（仅限回环地址）。完整的请求/响应契约见 [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md)。
+* 🚧 **碰撞影子可强制执行（默认关闭）：** 使用 `--collision-shadow-enforce` 时，在路由真实指令之前，于 `--collision-shadow-timeout-ms` 的等待时限内先询问孪生体；预测到接触则拒绝该指令（`409`），孪生体未在时限内回答同样拒绝（`503`）：指令绝不会未经检查就发出。模拟指令不会被询问。尚未用真实机器人试过。
 
 **诚实说明——今天实际运行的内容：** `route --mode real|simulation --joint 名称 --position 数值 [--collision-risk] [--distance 米数] [--transport-latency-ms 毫秒] [--transport-timeout-ms 毫秒] [--transport-disconnected]` 会做出真实的路由决策——`simulation` 模式总是发送，`real` 模式受真实安全联锁约束，在没有孪生体风险报告、设置了 `--collision-risk`、距离为 NaN 或余量小于 5 厘米时就会阻止指令（`--clear-distance 米数` 可提供无碰撞报告）。`mirror --joint 名称 --position 数值` 会无条件镜像一条指令。`serve` 则把两者都以真实的 HTTP JSON 形式对外提供，而不再局限于一次性的 CLI 调用。三者默认都路由到一个内存中的接收器（`RecordingSink`，而非真正的控制器或真正的 HYDRA-UMC-TWIN 实例），如果传入上述传输层参数，则路由到一个真的会失败（超时/断开）的 `SimulatedTransport`——目前还没有 gRPC/WebSocket 传输层。具体已交付内容请参见 [`CHANGELOG.md`](CHANGELOG.md)，每个命令/端点请参见 [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md)，尚待完成的内容请参见下方路线图。
 
@@ -167,7 +168,7 @@ cargo run --release -- serve --port 8113 --token-file token.txt   # real mode al
 
 ## 🧪 测试
 
-运行 `cargo test` 会执行 144 个 Rust 测试，它们位于 `src/` 的模块内，不需要硬件和网络。
+运行 `cargo test` 会执行 149 个 Rust 测试，它们位于 `src/` 的模块内，不需要硬件和网络。
 
 CI 运行 `HYDRA_UMC_CI=1 python tools/ci_validate.py`，检查清单、文档、八个 README 和图片。
 

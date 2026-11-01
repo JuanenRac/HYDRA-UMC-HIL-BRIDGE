@@ -307,6 +307,9 @@ fn load_collision_shadow(
         if find_flag(args, "--collision-shadow-timeout-ms").is_some() {
             return Err("--collision-shadow-timeout-ms needs --collision-shadow".to_string());
         }
+        if has_flag(args, "--collision-shadow-enforce") {
+            return Err("--collision-shadow-enforce needs --collision-shadow".to_string());
+        }
         return Ok(None);
     }
     let Some((addr, token, _)) = twin_endpoint(args)? else {
@@ -486,6 +489,7 @@ fn run_serve(args: &[String]) -> ExitCode {
                 None => eprintln!("[hil-bridge] no --twin-url: the twin is not told where the real joints are (start the twin with --require-fresh-state-ms to make it insist)"),
             }
             match &collision_shadow {
+                Some(_) if has_flag(args, "--collision-shadow-enforce") => eprintln!("[hil-bridge] --collision-shadow-enforce: the twin is asked BEFORE each real command is routed; a predicted contact, or no answer inside the wait budget, refuses the command (never sent unchecked)"),
                 Some(_) => eprintln!("[hil-bridge] --collision-shadow: after each delivered real command the twin is asked whether it predicts a contact; the answer is recorded and never blocks anything"),
                 None => eprintln!("[hil-bridge] no --collision-shadow: the collision prediction of the twin is not asked"),
             }
@@ -526,6 +530,8 @@ fn run_serve(args: &[String]) -> ExitCode {
                     limits,
                     workers,
                     twin,
+                    shadow_enforce: collision_shadow.is_some()
+                        && has_flag(args, "--collision-shadow-enforce"),
                     collision_shadow,
                     sim_robot,
                 },

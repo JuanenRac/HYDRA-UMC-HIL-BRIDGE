@@ -18,7 +18,7 @@ GPL-3.0-or-later - see LICENSE
   <img src="https://img.shields.io/badge/License-GPL%203.0--or--later-blue.svg" alt="GPL 3.0 or later">
   <img src="https://img.shields.io/badge/Rust-2021-DEA584.svg" alt="Rust">
   <img src="https://img.shields.io/badge/Safety-Interlock-gated-red.svg" alt="Safety">
-  <img src="https://img.shields.io/badge/Tests-144%20passing-2ea44f.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-149%20passing-2ea44f.svg" alt="Tests">
   <img src="https://img.shields.io/badge/Version-0.1.3-0f6cbd.svg" alt="Version">
   <img src="https://img.shields.io/badge/Maturity-functional-0F6CBD.svg" alt="Maturity">
 </p>
@@ -35,7 +35,7 @@ GPL-3.0-or-later - see LICENSE
 |---|---|
 | Versão | `0.1.3` |
 | Maturidade | Funcional |
-| Testes | 144 (`cargo test`) |
+| Testes | 149 (`cargo test`) |
 | Tecnologia | Rust / hardware-in-the-loop I/O |
 | Destino | O Raspberry Pi CM5 de uma célula HYDRA-UMC |
 | Em hardware real | Só simulado: testado com emuladores, dublês de teste ou simuladores; não há registo de execução em hardware real para esta versão |
@@ -51,7 +51,7 @@ Cada linha é uma parte deste repositório e a luz diz até onde chega hoje. É 
 | Área | Estado | O que significa aqui |
 |---|---|---|
 | Software | 🟡 | Funciona para o seu propósito principal; a verificação de honestidade acima lista o que ainda falta |
-| Testes | 🟢 | 144 testes automáticos, executados a cada alteração |
+| Testes | 🟢 | 149 testes automáticos, executados a cada alteração |
 | Hardware real | 🟠 | Só simulado: testado com emuladores, dublês de teste ou simuladores; não há registo de execução em hardware real para esta versão |
 | Documentação | 🟢 | README em oito idiomas, verificado contra o manifesto a cada alteração |
 
@@ -113,6 +113,7 @@ flowchart LR
 * 📡 **Protocolo unificado (planeado):** usa gRPC para sincronização local de alta velocidade e WebSockets para monitorização remota - ainda não há transporte de rede ligado, de propósito (veja `Cargo.toml`).
 * 🧪 **Transporte com falha segura, testável sem hardware (v0):** `CommandSink::send()` devolve um `Result` real, e um `SimulatedTransport` pode modelar uma ligação expirada ou desligada; a ponte reporta um resultado `TransportFailure` distinto em vez de alguma vez afirmar que um comando foi entregue quando não foi - exercitável com `--transport-latency-ms`/`--transport-timeout-ms`/`--transport-disconnected` em `route`.
 * 🌐 **API JSON HTTP (v0):** `serve [--addr ADDR] [--port PORT]` (por defeito `127.0.0.1:8113`) expõe a mesma lógica exata de encaminhamento/espelhamento em `POST /route`, `POST /mirror` e `GET /stats` através de um servidor `tiny_http` bloqueante real - o mesmo binário que a unidade `systemd/hydra-umc-hil-bridge.service` de um CM5 implantado executa só em loopback. Veja [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) para o contrato completo de pedido/resposta.
+* 🚧 **A sombra de colisão pode ser imposta (desligada por omissão):** com `--collision-shadow-enforce` pergunta-se ao gémeo ANTES de encaminhar um comando real, dentro do prazo de `--collision-shadow-timeout-ms`; um contacto previsto recusa o comando (`409`), tal como um gémeo que não responde a tempo (`503`): um comando nunca sai sem ser verificado. Os comandos de simulação não são consultados. Não testado com um robô real.
 
 **Verificação de honestidade - o que realmente funciona hoje:** `route --mode real|simulation --joint NAME --position VALUE [--collision-risk] [--distance METERS] [--clear-distance METERS] [--transport-latency-ms MS] [--transport-timeout-ms MS] [--transport-disconnected]` toma uma decisão de encaminhamento real - o modo `simulation` envia sempre, o modo `real` é controlado por um interbloqueio de segurança real que bloqueia o comando sem relatório de risco do gémeo, com `--collision-risk`, com uma distância NaN ou com menos de 5 cm de folga. `mirror --joint NAME --position VALUE` sombreia um comando incondicionalmente. `serve` expõe ambos por HTTP JSON real em vez de invocações CLI de uma só vez. Todos encaminham por defeito para um sumidouro em memória (`RecordingSink`, não um controlador real nem uma instância real do HYDRA-UMC-TWIN), ou para um `SimulatedTransport` que pode falhar de verdade (tempo esgotado/desligado) quando se passam as opções de transporte acima - ainda não há transporte gRPC/WebSocket. Veja o [`CHANGELOG.md`](CHANGELOG.md) para saber exatamente o que foi entregue, [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) para cada comando/ponto final e o Roteiro abaixo para o que ainda falta.
 
@@ -162,7 +163,7 @@ cargo run --release -- serve --port 8113 --token-file token.txt   # real mode al
 
 ## 🧪 Testes
 
-144 testes Rust correm com `cargo test`; estão dentro dos módulos de `src/`. Não precisam de hardware nem de rede.
+149 testes Rust correm com `cargo test`; estão dentro dos módulos de `src/`. Não precisam de hardware nem de rede.
 
 A CI executa `HYDRA_UMC_CI=1 python tools/ci_validate.py`, que verifica o manifesto, os documentos, os oito README e as imagens.
 

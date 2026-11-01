@@ -4,6 +4,7 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+- **The collision shadow can be enforced.** `serve --collision-shadow-enforce` (needs `--collision-shadow`; off by default, where the shadow only informs) asks the twin about a real command BEFORE it is routed, inside the wait budget of `--collision-shadow-timeout-ms`: a command the twin predicts a contact for is refused with `409` (`blockedBy: collision_shadow`), and a command the twin could not check in time (no answer, the route off, a refusal) is refused with `503` (`collision_shadow_unavailable`). A command is never sent unchecked while it is enforced; the interlock and the certificates still decide afterwards. `GET /stats` reports `shadowEnforce`, `shadowBlocked` and `shadowUnavailable`, `/metrics` the two counters, and the audit log records each refusal. Simulation commands are not asked about.
 ## [0.1.3] - Hardware-in-the-loop with no robot and GET /metrics in the Prometheus format
 
 - **Hardware-in-the-loop with no robot (`serve --sim-robot`) and `GET /metrics`.** The commands, and the stops of the watchdog, are delivered to the simulated robot of the twin (`--sim-config` there) instead of a recording; the interlock, the certificates, the limits and the audit work as with a robot. `GET /metrics` gives the counters of the bridge as Prometheus text, behind the token.
