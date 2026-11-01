@@ -162,56 +162,104 @@ fn status_to_result(status: u16) -> Result<(), TransportError> {
     }
 }
 
-impl TwinStateSink for HttpTwinSink {
-    fn report(&self, report: &JointStateReport) -> Result<(), TransportError> {
-        let timeout_ms = self.timeout.as_millis() as u64;
-        let addr = self
-            .addr
-            .to_socket_addrs()
-            .map_err(|_| TransportError::Disconnected)?
-            .next()
-            .ok_or(TransportError::Disconnected)?;
-        let mut stream = TcpStream::connect_timeout(&addr, self.timeout)
-            .map_err(|_| TransportError::Disconnected)?;
-        let _ = stream.set_read_timeout(Some(self.timeout));
-        let _ = stream.set_write_timeout(Some(self.timeout));
-        let body = serde_json::to_string(report).expect("a report always serializes");
-        let request = format!(
-            "POST /interlock/state HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            self.addr,
-            self.token,
-            body.len(),
-            body
-        );
-        stream
-            .write_all(request.as_bytes())
-            .map_err(|_| TransportError::Timeout {
-                after_ms: timeout_ms,
-            })?;
-        let mut head = Vec::new();
-        let mut chunk = [0u8; 256];
-        // only the status line is needed
-        while !head.contains(&b'\n') && head.len() < 1024 {
-            match stream.read(&mut chunk) {
-                Ok(0) => break,
-                Ok(n) => head.extend_from_slice(&chunk[..n]),
-                Err(_) => {
-                    return Err(TransportError::Timeout {
-                        after_ms: timeout_ms,
-                    })
-                }
+/// One `POST` of a JSON body to the twin with its bearer token; the answer is only the status code of the first line.
+fn post_json_status(
+    addr: &str,
+    token: &str,
+    timeout: Duration,
+    path: &str,
+    body: &str,
+) -> Result<u16, TransportError> {
+    let timeout_ms = timeout.as_millis() as u64;
+    let socket = addr
+        .to_socket_addrs()
+        .map_err(|_| TransportError::Disconnected)?
+        .next()
+        .ok_or(TransportError::Disconnected)?;
+    let mut stream =
+        TcpStream::connect_timeout(&socket, timeout).map_err(|_| TransportError::Disconnected)?;
+    let _ = stream.set_read_timeout(Some(timeout));
+    let _ = stream.set_write_timeout(Some(timeout));
+    let request = format!(
+        "POST {path} HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|_| TransportError::Timeout {
+            after_ms: timeout_ms,
+        })?;
+    let mut head = Vec::new();
+    let mut chunk = [0u8; 256];
+    // only the status line is needed
+    while !head.contains(&b'\n') && head.len() < 1024 {
+        match stream.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => head.extend_from_slice(&chunk[..n]),
+            Err(_) => {
+                return Err(TransportError::Timeout {
+                    after_ms: timeout_ms,
+                })
             }
         }
-        let line = String::from_utf8_lossy(&head);
-        let status: u16 = line
-            .lines()
-            .next()
-            .unwrap_or("")
-            .split_whitespace()
-            .nth(1)
-            .and_then(|s| s.parse().ok())
-            .ok_or(TransportError::Disconnected)?;
+    }
+    let line = String::from_utf8_lossy(&head);
+    line.lines()
+        .next()
+        .unwrap_or("")
+        .split_whitespace()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .ok_or(TransportError::Disconnected)
+}
+
+impl TwinStateSink for HttpTwinSink {
+    fn report(&self, report: &JointStateReport) -> Result<(), TransportError> {
+        let body = serde_json::to_string(report).expect("a report always serializes");
+        let status = post_json_status(
+            &self.addr,
+            &self.token,
+            self.timeout,
+            "/interlock/state",
+            &body,
+        )?;
         status_to_result(status)
+    }
+}
+
+/// The simulated robot of HYDRA-UMC-TWIN (`serve --sim-config`) as the place a real command is delivered to: a hardware-in-the-loop run
+/// with no robot. `send` is `POST /sim/command` and `stop` asks the model to stop the joint with its own top deceleration. The twin then
+/// moves the joint over time and reports it back to itself as `measured`, so the whole loop of the bridge, the interlock and the twin runs.
+#[derive(Debug, Clone)]
+pub struct TwinSimSink {
+    /// `host:port`
+    pub addr: String,
+    pub token: String,
+    pub timeout: Duration,
+}
+
+impl TwinSimSink {
+    fn post(&self, body: &serde_json::Value) -> Result<(), TransportError> {
+        match post_json_status(
+            &self.addr,
+            &self.token,
+            self.timeout,
+            "/sim/command",
+            &body.to_string(),
+        )? {
+            200 => Ok(()),
+            other => Err(TransportError::Rejected { status: other }),
+        }
+    }
+}
+
+impl crate::bridge::CommandSink for TwinSimSink {
+    fn send(&mut self, command: &crate::protocol::JointCommand) -> Result<(), TransportError> {
+        self.post(&serde_json::json!({"joint": command.joint, "position": command.position}))
+    }
+
+    fn stop(&mut self, joint: &str) -> Result<(), TransportError> {
+        self.post(&serde_json::json!({"joint": joint, "stop": true}))
     }
 }
 
@@ -392,5 +440,70 @@ mod tests {
             Err(TransportError::Timeout { after_ms: 150 })
         );
         drop(listener);
+    }
+
+    fn sim_sink(addr: String) -> TwinSimSink {
+        TwinSimSink {
+            addr,
+            token: "a-certify-token-of-sixteen+".to_string(),
+            timeout: Duration::from_millis(1500),
+        }
+    }
+
+    #[test]
+    fn the_simulated_robot_receives_a_command_with_the_token_and_the_joint_and_position() {
+        use crate::bridge::CommandSink;
+        use crate::protocol::JointCommand;
+        let (addr, rx) = canned_server("200 OK");
+        let mut sink = sim_sink(addr);
+        let command = JointCommand {
+            joint: "elbow".to_string(),
+            position: -0.25,
+        };
+        assert_eq!(sink.send(&command), Ok(()));
+        let sent = rx.recv().unwrap();
+        assert!(sent.starts_with("POST /sim/command HTTP/1.1"), "{sent}");
+        assert!(sent.contains("Authorization: Bearer a-certify-token-of-sixteen+"));
+        assert!(sent.contains(r#""joint":"elbow""#) && sent.contains(r#""position":-0.25"#));
+    }
+
+    #[test]
+    fn a_stop_asks_the_simulated_robot_to_brake_the_joint() {
+        use crate::bridge::CommandSink;
+        let (addr, rx) = canned_server("200 OK");
+        assert_eq!(sim_sink(addr).stop("elbow"), Ok(()));
+        let sent = rx.recv().unwrap();
+        assert!(
+            sent.contains(r#""stop":true"#) && sent.contains(r#""joint":"elbow""#),
+            "{sent}"
+        );
+        assert!(!sent.contains("position"), "{sent}");
+    }
+
+    #[test]
+    fn a_refusal_or_a_dead_simulated_robot_is_an_error_and_never_a_delivered_command() {
+        use crate::bridge::CommandSink;
+        use crate::protocol::JointCommand;
+        let command = JointCommand {
+            joint: "elbow".to_string(),
+            position: 0.0,
+        };
+        let (addr, _rx) = canned_server("400 Bad Request");
+        assert_eq!(
+            sim_sink(addr).send(&command),
+            Err(TransportError::Rejected { status: 400 })
+        );
+        let (addr, _rx) = canned_server("401 Unauthorized");
+        assert_eq!(
+            sim_sink(addr).stop("elbow"),
+            Err(TransportError::Rejected { status: 401 })
+        );
+        let free = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let dead = free.local_addr().unwrap().to_string();
+        drop(free);
+        assert_eq!(
+            sim_sink(dead).send(&command),
+            Err(TransportError::Disconnected)
+        );
     }
 }

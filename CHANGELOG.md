@@ -4,6 +4,8 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+- **Hardware-in-the-loop with no robot (`serve --sim-robot`) and `GET /metrics`.** The commands, and the stops of the watchdog, are delivered to the simulated robot of the twin (`--sim-config` there) instead of a recording; the interlock, the certificates, the limits and the audit work as with a robot. `GET /metrics` gives the counters of the bridge as Prometheus text, behind the token.
+
 ## [0.1.2] - Collision prediction of the twin asked in shadow and a bridge that tells the twin where the real joints are
 
 - **Collision prediction of the twin, asked in shadow.** `serve --collision-shadow` (off by default; needs `--twin-url`; `--collision-shadow-timeout-ms` sets the wait) asks `POST /predict/collision` of the twin after each real command that was delivered, naming the joint and the commanded position, and records whether the twin predicts a contact with a zone or with the robot itself: in the audit log (`collision_shadow`), in `GET /stats` (`collisionShadow`, `shadowPredictions`, `shadowWouldBlock`, `shadowFailures`, `shadowLast`) and in the header `X-Collision-Shadow` of the answer of `POST /route`. It only informs: it is asked after the command went, so it never blocks a command or changes the decision of the interlock, and a twin that gives no answer is `failed`, never `clear`. Without the switch nothing is asked and the answers are as before. Not tried with a real robot.

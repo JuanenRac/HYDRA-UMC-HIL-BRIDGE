@@ -22,6 +22,7 @@ mod certificate;
 mod collision_shadow;
 mod interlock;
 mod limits;
+mod metrics;
 mod protocol;
 mod server;
 mod twin_link;
@@ -334,6 +335,27 @@ fn load_collision_shadow(
     )))
 }
 
+/// `--sim-robot` (off by default): deliver the commands to the simulated robot of HYDRA-UMC-TWIN (started with `--sim-config`) instead of a
+/// recording. It needs the link to the twin (`--twin-url` and its token), which it uses.
+fn load_sim_robot(
+    args: &[String],
+) -> Result<Option<std::sync::Arc<twin_link::TwinSimSink>>, String> {
+    if !has_flag(args, "--sim-robot") {
+        return Ok(None);
+    }
+    let Some((addr, token, timeout_ms)) = twin_endpoint(args)? else {
+        return Err(
+            "--sim-robot needs --twin-url (and its token): the simulated robot is the twin's"
+                .to_string(),
+        );
+    };
+    Ok(Some(std::sync::Arc::new(twin_link::TwinSimSink {
+        addr,
+        token,
+        timeout: std::time::Duration::from_millis(timeout_ms),
+    })))
+}
+
 /// `host:port`, the token and the timeout of `--twin-url`; None when there is no URL.
 fn twin_endpoint(args: &[String]) -> Result<Option<(String, String, u64)>, String> {
     let Some(url) = find_flag(args, "--twin-url") else {
@@ -435,6 +457,17 @@ fn run_serve(args: &[String]) -> ExitCode {
         }
     };
 
+    let sim_robot = match load_sim_robot(args) {
+        Ok(sim) => sim,
+        Err(e) => {
+            eprintln!("[hil-bridge] fatal: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    if sim_robot.is_some() {
+        eprintln!("[hil-bridge] --sim-robot: the commands are delivered to the simulated robot of the twin (a model, no robot behind it); the interlock, the limits and the watchdog work as they do with a robot");
+    }
+
     match server::bind(&bind_addr) {
         Ok(bound) => {
             eprintln!(
@@ -494,6 +527,7 @@ fn run_serve(args: &[String]) -> ExitCode {
                     workers,
                     twin,
                     collision_shadow,
+                    sim_robot,
                 },
             );
             ExitCode::SUCCESS

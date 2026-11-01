@@ -26,6 +26,7 @@ use crate::bridge::{Bridge, CommandSink, RecordingSink, RouteOutcome, SimulatedT
 use crate::certificate::{verify, Certificate, CertificatePolicy, NonceCache, TrustedKeys};
 use crate::interlock::TwinRiskReport;
 use crate::limits::JointLimits;
+use crate::metrics::Series;
 use crate::protocol::{JointCommand, Mode};
 use crate::twin_link::{
     deliver, JointStateReport, MirrorOutcome, StateSequencer, StateSource, TwinStateSink,
@@ -199,6 +200,9 @@ pub struct ServerConfig {
     /// `--collision-shadow`: after a real command is delivered, ask the twin whether it predicts a contact. Information only, it never blocks
     /// anything. Needs the twin link. None: nothing is asked.
     pub collision_shadow: Option<std::sync::Arc<dyn crate::collision_shadow::CollisionShadow>>,
+    /// `--sim-robot`: the place the real commands (and the stops of the watchdog) are delivered to is the simulated robot of the twin, not a
+    /// recording. The interlock, the certificates, the limits and the watchdog work as they do with a robot; only the robot is a model.
+    pub sim_robot: Option<std::sync::Arc<crate::twin_link::TwinSimSink>>,
 }
 
 /// What the bridge itself knows about who sent a request.
@@ -273,7 +277,7 @@ struct State {
     audit: Audit,
     stats: Stats,
     leases: Leases,
-    hold_sink: RecordingSink,
+    hold_sink: Box<dyn CommandSink + Send>,
     twin_seq: StateSequencer,
     /// The report of a real command that was just delivered, made under the lock and sent after it is released.
     pending_twin: Option<JointStateReport>,
@@ -333,7 +337,10 @@ pub fn run_with_config(server: Server, config: ServerConfig) {
         audit: Audit::new(config.audit_log.clone()),
         stats: Stats::default(),
         leases: Leases::new(config.watchdog),
-        hold_sink: RecordingSink::default(),
+        hold_sink: match &config.sim_robot {
+            Some(sim) => Box::new((**sim).clone()),
+            None => Box::new(RecordingSink::default()),
+        },
         twin_seq: StateSequencer::default(),
         pending_twin: None,
     };
@@ -365,7 +372,7 @@ fn worker_loop(server: &Server, shared: &Shared) {
                 stats,
                 ..
             } = &mut *state;
-            stop_lapsed_leases(leases, hold_sink, audit, stats);
+            stop_lapsed_leases(leases, hold_sink.as_mut(), audit, stats);
         }
         let request = match server.recv_timeout(Duration::from_millis(WATCHDOG_TICK_MS)) {
             Ok(Some(request)) => request,
@@ -434,6 +441,146 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
             })
         };
         Reply::json(200, body).send(request);
+        return;
+    }
+    if path == "/metrics" && request.method() == &Method::Get {
+        // the counters in the text format of Prometheus; behind the token like every route but /stats
+        let text = {
+            let state = shared.lock();
+            let stats = &state.stats;
+            let mut series = vec![
+                Series::counter(
+                    "hydra_umc_hil_bridge_routed_real_total",
+                    "Real-mode commands that were delivered.",
+                    stats.routed_real,
+                ),
+                Series::counter(
+                    "hydra_umc_hil_bridge_routed_simulation_total",
+                    "Simulation-mode commands that were delivered.",
+                    stats.routed_simulation,
+                ),
+                Series::counter(
+                    "hydra_umc_hil_bridge_blocked_by_interlock_total",
+                    "Real commands the interlock did not let through.",
+                    stats.blocked_by_interlock,
+                ),
+                Series::counter(
+                    "hydra_umc_hil_bridge_transport_failures_total",
+                    "Commands that could not be delivered (timeout, disconnected, refused).",
+                    stats.transport_failures,
+                ),
+                Series::counter(
+                    "hydra_umc_hil_bridge_mirrored_total",
+                    "Commands mirrored into the sink.",
+                    stats.mirrored,
+                ),
+                Series::counter(
+                    "hydra_umc_hil_bridge_mirror_failures_total",
+                    "Mirrored commands that failed.",
+                    stats.mirror_failures,
+                ),
+                Series::counter(
+                    "hydra_umc_hil_bridge_malformed_requests_total",
+                    "Requests refused as malformed.",
+                    stats.malformed_requests,
+                ),
+                Series::counter(
+                    "hydra_umc_hil_bridge_not_found_total",
+                    "Requests to a path that does not exist.",
+                    stats.not_found,
+                ),
+                Series::counter(
+                    "hydra_umc_hil_bridge_unauthorized_total",
+                    "Requests refused for a missing or wrong token.",
+                    stats.unauthorized,
+                ),
+                Series::counter(
+                    "hydra_umc_hil_bridge_uncertified_total",
+                    "Real commands refused for lack of a valid certificate.",
+                    stats.uncertified,
+                ),
+                Series::counter(
+                    "hydra_umc_hil_bridge_audit_failures_total",
+                    "Real orders refused because they could not be recorded.",
+                    stats.audit_failures,
+                ),
+                Series::counter(
+                    "hydra_umc_hil_bridge_stale_commands_total",
+                    "Real commands refused as outside their validity window.",
+                    stats.stale_commands,
+                ),
+                Series::counter(
+                    "hydra_umc_hil_bridge_outside_limits_total",
+                    "Real commands refused as outside the joint limits.",
+                    stats.outside_limits,
+                ),
+                Series::counter(
+                    "hydra_umc_hil_bridge_watchdog_stops_total",
+                    "Joints stopped because their command lease ran out.",
+                    stats.watchdog_stops,
+                ),
+                Series::counter(
+                    "hydra_umc_hil_bridge_watchdog_stop_failures_total",
+                    "Watchdog stops that could not be delivered.",
+                    stats.watchdog_stop_failures,
+                ),
+                Series::gauge(
+                    "hydra_umc_hil_bridge_active_leases",
+                    "Joints with a valid command lease.",
+                    state.leases.active(now_ms()) as f64,
+                ),
+                Series::gauge(
+                    "hydra_umc_hil_bridge_certified_mode",
+                    "1 when real commands need a certificate signed by the twin.",
+                    if config.interlock.trusted_keys.is_empty() {
+                        0.0
+                    } else {
+                        1.0
+                    },
+                ),
+                Series::counter(
+                    "hydra_umc_hil_bridge_twin_reports_total",
+                    "State reports sent to the twin.",
+                    stats.twin_reports,
+                ),
+                Series::counter(
+                    "hydra_umc_hil_bridge_twin_report_failures_total",
+                    "State reports to the twin that failed.",
+                    stats.twin_report_failures,
+                ),
+                Series::counter(
+                    "hydra_umc_hil_bridge_shadow_predictions_total",
+                    "Collision predictions asked of the twin in shadow.",
+                    stats.shadow_predictions,
+                ),
+                Series::counter(
+                    "hydra_umc_hil_bridge_shadow_would_block_total",
+                    "Shadow predictions that said a contact was coming.",
+                    stats.shadow_would_block,
+                ),
+                Series::counter(
+                    "hydra_umc_hil_bridge_shadow_failures_total",
+                    "Shadow predictions that could not be asked.",
+                    stats.shadow_failures,
+                ),
+            ];
+            if let Some(in_sync) = stats.twin_in_sync {
+                series.push(Series::gauge(
+                    "hydra_umc_hil_bridge_twin_in_sync",
+                    "1 when the last state report reached the twin.",
+                    if in_sync { 1.0 } else { 0.0 },
+                ));
+            }
+            crate::metrics::exposition(env!("CARGO_PKG_VERSION"), &series)
+        };
+        let _ = request.respond(
+            Response::from_string(text)
+                .with_status_code(200)
+                .with_header(header(
+                    "Content-Type",
+                    "text/plain; version=0.0.4; charset=utf-8",
+                )),
+        );
         return;
     }
     if path == "/audit" && request.method() == &Method::Get {
@@ -511,6 +658,7 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
                         interlock: &config.interlock,
                         limits: config.limits.as_ref(),
                         twin_linked: config.twin.is_some(),
+                        sim_robot: config.sim_robot.as_deref(),
                     },
                     &info,
                 );
@@ -597,6 +745,8 @@ struct RouteContext<'a> {
     limits: Option<&'a JointLimits>,
     /// A twin is configured: a delivered real command is reported to it.
     twin_linked: bool,
+    /// `--sim-robot`: the commands are delivered to the simulated robot of the twin.
+    sim_robot: Option<&'a crate::twin_link::TwinSimSink>,
 }
 
 fn audit_entry(
@@ -703,17 +853,23 @@ fn handle_route(raw: &str, state: &mut State, context: &RouteContext, info: &Req
             req.transport.timeout_ms.unwrap_or(u64::MAX),
         )
     };
+    let mut twin_sim = context.sim_robot.cloned();
     let real_sink: &mut dyn CommandSink = if use_simulated {
         &mut simulated_real
+    } else if let Some(sim) = twin_sim.as_mut() {
+        sim
     } else {
         &mut recording_real
     };
-    let mut sim_sink = RecordingSink::default();
+    let mut recording_sim = RecordingSink::default();
+    let mut twin_sim_for_simulation = context.sim_robot.cloned();
+    let sim_sink: &mut dyn CommandSink = match twin_sim_for_simulation.as_mut() {
+        Some(sim) => sim,
+        None => &mut recording_sim,
+    };
 
     let outcome = match req.mode {
-        Mode::Simulation => {
-            bridge.route_command(command.clone(), req.risk, real_sink, &mut sim_sink)
-        }
+        Mode::Simulation => bridge.route_command(command.clone(), req.risk, real_sink, sim_sink),
         Mode::Real => {
             // Real mode: the report that gates the command must be the twin's. A certificate is checked (signature, command, age, replay);
             // an unsigned report is believed only on the bench setting; anything else is blocked with the reason.
@@ -749,12 +905,9 @@ fn handle_route(raw: &str, state: &mut State, context: &RouteContext, info: &Req
                     Err("a real command needs a risk certificate signed by the twin (field \"certificate\"); a report written by the caller is not accepted".to_string())
                 };
                 match report {
-                    Ok(report) => bridge.route_command(
-                        command.clone(),
-                        Some(report),
-                        real_sink,
-                        &mut sim_sink,
-                    ),
+                    Ok(report) => {
+                        bridge.route_command(command.clone(), Some(report), real_sink, sim_sink)
+                    }
                     Err(reason) => {
                         stats.uncertified += 1;
                         RouteOutcome::BlockedByInterlock { reason }
@@ -1358,6 +1511,38 @@ mod tests {
         assert_eq!(post_raw(port, "/route", &wrong, body.as_bytes()), 401);
         let basic = format!("{json}Authorization: Basic {TEST_TOKEN}\r\n");
         assert_eq!(post_raw(port, "/route", &basic, body.as_bytes()), 401);
+    }
+
+    #[test]
+    fn the_metrics_are_prometheus_text_behind_the_token_and_follow_what_the_bridge_does() {
+        let port = start_test_server_with_token();
+        assert_eq!(get_status_with_headers(port, "/metrics", ""), 401);
+        let auth = format!("Authorization: Bearer {TEST_TOKEN}\r\n");
+        let (status, first) = get_with(port, "/metrics", &auth);
+        assert_eq!(status, 200, "{first}");
+        crate::metrics::tests::assert_valid_exposition(&first);
+        assert!(first.contains("hydra_umc_hil_bridge_info{version=\""));
+        assert!(first.contains("hydra_umc_hil_bridge_routed_simulation_total 0"));
+        assert!(!first.contains(TEST_TOKEN));
+
+        let body = r#"{"mode":"simulation","joint":"shoulder","position":0.5}"#;
+        let headers = format!("{auth}Content-Type: application/json\r\n");
+        assert_eq!(post_raw(port, "/route", &headers, body.as_bytes()), 200);
+        let (_, second) = get_with(port, "/metrics", &auth);
+        crate::metrics::tests::assert_valid_exposition(&second);
+        assert!(
+            second.contains("hydra_umc_hil_bridge_routed_simulation_total 1"),
+            "{second}"
+        );
+        assert!(
+            second.contains("hydra_umc_hil_bridge_unauthorized_total 1"),
+            "{second}"
+        );
+        // no joint, position or certificate is ever a metric
+        assert!(
+            !second.contains("shoulder") && !second.contains("0.5"),
+            "{second}"
+        );
     }
 
     #[test]

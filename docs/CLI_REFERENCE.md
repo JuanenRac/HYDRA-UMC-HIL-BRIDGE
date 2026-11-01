@@ -290,3 +290,16 @@ Off by default. With `--collision-shadow` (it needs `--twin-url` and its token, 
 | `--collision-shadow-timeout-ms N` | Connect, write and read limit of one question, 10 to 10000 (default 1000). Needs `--collision-shadow`. |
 
 `GET /stats` adds `collisionShadow`, `shadowPredictions` (answered), `shadowWouldBlock` (answered with a predicted contact), `shadowFailures` and `shadowLast` (`null` until the first question). Simulation mode and blocked commands are never asked about. Not tried with a real robot or a real controller; the prediction is described in the documentation of HYDRA-UMC-TWIN and HYDRA-UMC-PHYSICS-REPLICA.
+
+## Delivering the commands to the twin's simulated robot (`serve --sim-robot`) and `GET /metrics`
+
+Off by default. With `--sim-robot` (it needs `--twin-url` and its token, which it uses) the place a command is delivered to is the **simulated robot of the twin** (the twin started
+with `--sim-config`) and not a recording: a real-mode command that passed the interlock becomes `POST /sim/command` on the twin, and so does a simulation-mode command. The
+watchdog stops a joint whose lease ran out with `{"joint","stop":true}`, which brakes the simulated joint where it can. The twin then moves the joint over time and reports
+it to itself as `measured`, so the whole loop runs without a robot: the certificate of the twin, the signature check, the limits, the validity window, the audit, the watchdog and the
+state that follows the joint. A refusal or an unreachable simulated robot is a delivery that failed (`TransportFailure`), never a command that went. The interlock does not
+change; only what is behind it is a model.
+
+`GET /metrics` answers the counters in the text format of Prometheus (version 0.0.4 of the exposition format): the same numbers as `GET /stats` (commands routed, blocked,
+refused and failed, the watchdog, the link to the twin, the shadow predictions) and the version. Unlike `/stats` it needs the token when the bridge has one, because it tells how
+many real commands were issued and refused. No joint, position, certificate, token or address is a metric.
