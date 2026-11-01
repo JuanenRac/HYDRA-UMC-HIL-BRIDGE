@@ -42,7 +42,8 @@ trap 'hydra_umc_pause_on_exit' EXIT
 set -euo pipefail
 cd "$(dirname "$0")"
 
-BIN="target/release/hydra-umc-hil-bridge"
+TARGET_DIR="${CARGO_TARGET_DIR:-target}"
+BIN="$TARGET_DIR/release/hydra-umc-hil-bridge"
 if [ ! -f "$BIN" ] && [ ! -f "${BIN}.exe" ]; then
   echo "No compiled binary found - run build.sh first." >&2
   exit 1

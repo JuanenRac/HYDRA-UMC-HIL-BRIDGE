@@ -34,7 +34,9 @@ if defined CI set "KEEP_OPEN=ver >nul"
 if "%HYDRA_UMC_CI%"=="1" set "KEEP_OPEN=ver >nul"
 cd /d "%~dp0"
 
-set BIN=target\release\hydra-umc-hil-bridge.exe
+set "TARGET_DIR=target"
+if defined CARGO_TARGET_DIR set "TARGET_DIR=%CARGO_TARGET_DIR%"
+set "BIN=%TARGET_DIR%\release\hydra-umc-hil-bridge.exe"
 
 if not exist "%BIN%" (
     echo No compiled binary found - run build.bat first. 1>&2
