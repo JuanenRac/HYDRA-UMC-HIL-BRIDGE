@@ -4,6 +4,8 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [0.1.3] - Hardware-in-the-loop with no robot and GET /metrics in the Prometheus format
+
 - **Hardware-in-the-loop with no robot (`serve --sim-robot`) and `GET /metrics`.** The commands, and the stops of the watchdog, are delivered to the simulated robot of the twin (`--sim-config` there) instead of a recording; the interlock, the certificates, the limits and the audit work as with a robot. `GET /metrics` gives the counters of the bridge as Prometheus text, behind the token.
 
 ## [0.1.2] - Collision prediction of the twin asked in shadow and a bridge that tells the twin where the real joints are
