@@ -13,6 +13,7 @@
 //! CLI already uses; this closes the "only reachable as a one-shot CLI"
 //! gap, not the still-deferred real gRPC/WebSocket transport question.
 
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -26,8 +27,10 @@ use crate::bridge::{Bridge, CommandSink, RecordingSink, RouteOutcome, SimulatedT
 use crate::certificate::{verify, Certificate, CertificatePolicy, NonceCache, TrustedKeys};
 use crate::interlock::TwinRiskReport;
 use crate::limits::JointLimits;
-use crate::metrics::Series;
+use crate::metrics::{Histogram, HistogramSeries, Series};
 use crate::protocol::{JointCommand, Mode};
+use crate::safety_zones::{ZonesDecision, ZonesState};
+use crate::session_record::{Event, Recorder};
 use crate::twin_link::{
     deliver, JointStateReport, MirrorOutcome, StateSequencer, StateSource, TwinStateSink,
 };
@@ -172,6 +175,19 @@ struct Stats {
     shadow_unavailable: u64,
     /// The last shadow answer: "clear", "collision" or "failed" (None: none was asked yet).
     shadow_last: Option<&'static str>,
+    /// The zone monitor as a condition of the interlock: real commands refused because the zones were not clear, and because it gave no
+    /// usable answer in time.
+    zones_checked: u64,
+    zones_blocked: u64,
+    zones_unavailable: u64,
+    /// The last state of the zones as the interlock read it: "clear", "blocked" or "unavailable" (None: none was asked yet).
+    zones_last: Option<&'static str>,
+    /// Sessions read back from the data lake and run again in simulation, and the replays that failed.
+    replays: u64,
+    replay_failures: u64,
+    /// How long `POST /route` took to answer, per mode.
+    route_real_seconds: Histogram,
+    route_simulation_seconds: Histogram,
 }
 
 /// How the interlock of the real mode is certified. The default trusts no twin and accepts no unsigned report: a real command is blocked
@@ -210,7 +226,21 @@ pub struct ServerConfig {
     /// `--sim-robot`: the place the real commands (and the stops of the watchdog) are delivered to is the simulated robot of the twin, not a
     /// recording. The interlock, the certificates, the limits and the watchdog work as they do with a robot; only the robot is a model.
     pub sim_robot: Option<std::sync::Arc<crate::twin_link::TwinSimSink>>,
+    /// `--safety-zones-url`: the state of the protected zones is asked of HYDRA-UMC-SAFETY-ZONES before a real command is routed, and only a
+    /// recent `READY` lets it go on. None: the zones are not part of the decision.
+    pub safety_zones: Option<std::sync::Arc<dyn ZonesState>>,
+    /// `--safety-zones-max-age-ms`: how old the state of the zones may be (0: `DEFAULT_ZONES_MAX_AGE_MS`).
+    pub zones_max_age_ms: u64,
+    /// `--record-url`: the commands and measured positions are recorded in the data lake as a session. None: nothing is recorded.
+    pub recorder: Option<Arc<Recorder>>,
+    /// `--replay-max-points`: the most points `POST /replay` reads from the lake (0: `DEFAULT_REPLAY_MAX_POINTS`).
+    pub replay_max_points: usize,
 }
+
+/// How old the state of the zones may be when nothing else is said.
+pub const DEFAULT_ZONES_MAX_AGE_MS: u64 = 5_000;
+/// The most points a replay reads from the data lake when nothing else is said.
+pub const DEFAULT_REPLAY_MAX_POINTS: usize = 20_000;
 
 /// What the bridge itself knows about who sent a request.
 struct RequestInfo {
@@ -446,6 +476,19 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
                 "shadowBlocked": stats.shadow_blocked,
                 "shadowUnavailable": stats.shadow_unavailable,
                 "shadowLast": stats.shadow_last,
+                "safetyZones": config.safety_zones.is_some(),
+                "zonesMaxAgeMs": zones_max_age_ms(config),
+                "zonesChecked": stats.zones_checked,
+                "zonesBlocked": stats.zones_blocked,
+                "zonesUnavailable": stats.zones_unavailable,
+                "zonesLast": stats.zones_last,
+                "sessionRecord": config.recorder.as_ref().map(|r| r.session()),
+                "sessionRecorded": config.recorder.as_ref().map(|r| r.counters.recorded.load(Ordering::Relaxed)),
+                "sessionDropped": config.recorder.as_ref().map(|r| r.counters.dropped.load(Ordering::Relaxed)),
+                "sessionFailed": config.recorder.as_ref().map(|r| r.counters.failed.load(Ordering::Relaxed)),
+                "replayEnabled": config.recorder.as_ref().is_some_and(|r| r.replay),
+                "replays": stats.replays,
+                "replayFailures": stats.replay_failures,
                 "urdfLimits": config.limits.as_ref().map(|l| l.len()),
                 "workers": if config.workers == 0 { DEFAULT_WORKERS } else { config.workers },
             })
@@ -584,6 +627,59 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
                     stats.shadow_unavailable,
                 ),
             ];
+            let refused = |reason, value: u64| {
+                Series::labelled_counter(
+                    "hydra_umc_hil_bridge_refused_total",
+                    "Real commands that were not forwarded, by the reason.",
+                    ("reason", reason),
+                    value,
+                )
+            };
+            series.extend([
+                refused("interlock", stats.blocked_by_interlock),
+                refused("certificate", stats.uncertified),
+                refused("stale", stats.stale_commands),
+                refused("limits", stats.outside_limits),
+                refused("collision_shadow", stats.shadow_blocked),
+                refused("collision_shadow_unavailable", stats.shadow_unavailable),
+                refused("safety_zones", stats.zones_blocked),
+                refused("safety_zones_unavailable", stats.zones_unavailable),
+                refused("audit", stats.audit_failures),
+                Series::counter(
+                    "hydra_umc_hil_bridge_zones_checked_total",
+                    "Times the state of the protected zones was asked before a real command.",
+                    stats.zones_checked,
+                ),
+                Series::counter(
+                    "hydra_umc_hil_bridge_replays_total",
+                    "Recorded sessions that were run again in simulation.",
+                    stats.replays,
+                ),
+                Series::counter(
+                    "hydra_umc_hil_bridge_replay_failures_total",
+                    "Replays that could not read the session from the data lake.",
+                    stats.replay_failures,
+                ),
+            ]);
+            if let Some(recorder) = &config.recorder {
+                series.extend([
+                    Series::counter(
+                        "hydra_umc_hil_bridge_session_recorded_total",
+                        "Samples of the session that the data lake accepted.",
+                        recorder.counters.recorded.load(Ordering::Relaxed),
+                    ),
+                    Series::counter(
+                        "hydra_umc_hil_bridge_session_dropped_total",
+                        "Events of the session dropped because the queue to the data lake was full.",
+                        recorder.counters.dropped.load(Ordering::Relaxed),
+                    ),
+                    Series::counter(
+                        "hydra_umc_hil_bridge_session_failed_total",
+                        "Samples of the session that the data lake did not accept.",
+                        recorder.counters.failed.load(Ordering::Relaxed),
+                    ),
+                ]);
+            }
             if let Some(in_sync) = stats.twin_in_sync {
                 series.push(Series::gauge(
                     "hydra_umc_hil_bridge_twin_in_sync",
@@ -591,7 +687,24 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
                     if in_sync { 1.0 } else { 0.0 },
                 ));
             }
-            crate::metrics::exposition(env!("CARGO_PKG_VERSION"), &series)
+            crate::metrics::exposition_with_histograms(
+                env!("CARGO_PKG_VERSION"),
+                &series,
+                &[
+                    HistogramSeries {
+                        name: "hydra_umc_hil_bridge_route_seconds",
+                        help: "Time to answer POST /route, including the questions to the twin and to the zone monitor.",
+                        label: ("mode", "real"),
+                        histogram: &stats.route_real_seconds,
+                    },
+                    HistogramSeries {
+                        name: "hydra_umc_hil_bridge_route_seconds",
+                        help: "Time to answer POST /route, including the questions to the twin and to the zone monitor.",
+                        label: ("mode", "simulation"),
+                        histogram: &stats.route_simulation_seconds,
+                    },
+                ],
+            )
         };
         let _ = request.respond(
             Response::from_string(text)
@@ -616,7 +729,7 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
         shared.lock().stats.not_found += 1;
         if matches!(
             path.as_str(),
-            "/route" | "/mirror" | "/measured" | "/stats" | "/audit"
+            "/route" | "/mirror" | "/measured" | "/replay" | "/stats" | "/audit"
         ) {
             Reply::json(405, json!({"error": "method not allowed"}))
                 .with(
@@ -667,15 +780,26 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
         authenticated,
     };
     // Enforced shadow: the twin is asked before the command is routed (outside the lock); a refusal never reaches the interlock or the robot.
-    let refused_by_shadow = if path == "/route" && config.shadow_enforce {
+    let route_started = (path == "/route").then(std::time::Instant::now);
+    // The zone monitor first (a cheap question to a service on the same machine), then the twin; either one refusing ends the request.
+    let refused_by_zones = if path == "/route" {
         config
-            .collision_shadow
+            .safety_zones
             .as_ref()
-            .and_then(|shadow| shadow_precheck(shared, shadow.as_ref(), &raw, &info))
+            .and_then(|zones| zones_precheck(shared, zones.as_ref(), &raw, &info))
     } else {
         None
     };
-    let reply = if let Some(refused) = refused_by_shadow {
+    let refused_by_shadow =
+        if refused_by_zones.is_none() && path == "/route" && config.shadow_enforce {
+            config
+                .collision_shadow
+                .as_ref()
+                .and_then(|shadow| shadow_precheck(shared, shadow.as_ref(), &raw, &info))
+        } else {
+            None
+        };
+    let reply = if let Some(refused) = refused_by_zones.or(refused_by_shadow) {
         refused
     } else {
         match path.as_str() {
@@ -691,6 +815,7 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
                             limits: config.limits.as_ref(),
                             twin_linked: config.twin.is_some(),
                             sim_robot: config.sim_robot.as_deref(),
+                            recorder: config.recorder.as_deref(),
                         },
                         &info,
                     );
@@ -717,6 +842,16 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
                 }
             }
             "/measured" => handle_measured(&raw, shared, &info),
+            "/replay" if config.recorder.as_ref().is_some_and(|r| r.replay) => {
+                handle_replay(&raw, shared)
+            }
+            "/replay" => {
+                shared.lock().stats.not_found += 1;
+                Reply::json(
+                    404,
+                    json!({"error": "replay is off: start the bridge with --record-url and --replay"}),
+                )
+            }
             "/mirror" => handle_mirror(&raw, &mut shared.lock().stats),
             _ => {
                 shared.lock().stats.not_found += 1;
@@ -724,7 +859,36 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
             }
         }
     };
+    if let Some(started) = route_started {
+        let seconds = started.elapsed().as_secs_f64();
+        let mut state = shared.lock();
+        if route_mode_is_real(&raw) {
+            state.stats.route_real_seconds.observe(seconds);
+        } else {
+            state.stats.route_simulation_seconds.observe(seconds);
+        }
+    }
     reply.send(request);
+}
+
+/// Whether a `/route` body asks for the real mode (anything that cannot be read counts as the simulation: it never reaches the hardware).
+fn route_mode_is_real(raw: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(raw)
+        .ok()
+        .and_then(|v| {
+            v.get("mode")
+                .and_then(serde_json::Value::as_str)
+                .map(|m| m == "real")
+        })
+        .unwrap_or(false)
+}
+
+fn zones_max_age_ms(config: &ServerConfig) -> u64 {
+    if config.zones_max_age_ms == 0 {
+        DEFAULT_ZONES_MAX_AGE_MS
+    } else {
+        config.zones_max_age_ms
+    }
 }
 
 /// How often the watchdog looks at the leases while no request arrives.
@@ -785,6 +949,8 @@ struct RouteContext<'a> {
     twin_linked: bool,
     /// `--sim-robot`: the commands are delivered to the simulated robot of the twin.
     sim_robot: Option<&'a crate::twin_link::TwinSimSink>,
+    /// `--record-url`: where the decided commands are recorded.
+    recorder: Option<&'a Recorder>,
 }
 
 fn audit_entry(
@@ -995,6 +1161,17 @@ fn handle_route(raw: &str, state: &mut State, context: &RouteContext, info: &Req
         RouteOutcome::BlockedByInterlock { .. } => stats.blocked_by_interlock += 1,
         RouteOutcome::TransportFailure { .. } => stats.transport_failures += 1,
     }
+    if let Some(recorder) = context.recorder {
+        recorder.record(
+            Event::Command {
+                joint: command.joint.clone(),
+                position: command.position,
+                real: req.mode == Mode::Real,
+                outcome: crate::session_record::outcome_code(&outcome),
+            },
+            now_ms(),
+        );
+    }
     eprintln!("{}", outcome.log_line(req.mode));
     Reply::json(200, serde_json::to_value(&outcome).unwrap())
         .with("X-Outcome-Kind", outcome.kind())
@@ -1194,7 +1371,246 @@ fn shadow_precheck(
         state.stats.audit_failures += 1;
         eprintln!("[hil-bridge] audit failure for a shadow check: {e}");
     }
+    drop(state);
+    if refusal.is_some() {
+        record_refusal(&shared.config, joint, position);
+    }
     refusal
+}
+
+/// A real command refused before it was routed is part of the session too.
+fn record_refusal(config: &ServerConfig, joint: &str, position: f64) {
+    if let Some(recorder) = &config.recorder {
+        recorder.record(
+            Event::Command {
+                joint: joint.to_string(),
+                position,
+                real: true,
+                outcome: crate::session_record::OUTCOME_REFUSED_BEFORE_ROUTING,
+            },
+            now_ms(),
+        );
+    }
+}
+
+/// The zone monitor as a condition of the interlock: asks `GET /state` BEFORE a real command is routed (outside the lock). `None` lets the
+/// command go on to the rest of the interlock (not a real command we can read, or the zones are clear and the state is recent); `Some(reply)`
+/// refuses it: `409` when the zones are not clear, `503` when the monitor gave no usable state in time. A real command is never forwarded on
+/// the silence of the monitor.
+fn zones_precheck(
+    shared: &Shared,
+    zones: &dyn ZonesState,
+    raw: &str,
+    info: &RequestInfo,
+) -> Option<Reply> {
+    let value: serde_json::Value = serde_json::from_str(raw).ok()?;
+    if value.get("mode").and_then(serde_json::Value::as_str) != Some("real") {
+        return None;
+    }
+    let joint = value.get("joint").and_then(serde_json::Value::as_str)?;
+    let position = value
+        .get("position")
+        .and_then(serde_json::Value::as_f64)
+        .filter(|p| p.is_finite())?;
+    let verdict = zones.state();
+    let decision =
+        crate::safety_zones::assess(&verdict, now_ms(), zones_max_age_ms(&shared.config));
+    let mut state = shared.lock();
+    state.stats.zones_checked += 1;
+    let (refusal, kind, reason) = match &decision {
+        ZonesDecision::Allow => {
+            state.stats.zones_last = Some("clear");
+            (None, "clear", "READY".to_string())
+        }
+        ZonesDecision::Blocked { reason } => {
+            state.stats.zones_blocked += 1;
+            state.stats.zones_last = Some("blocked");
+            eprintln!("[hil-bridge] safety zones: command for joint {joint:?} at {position} refused: {reason}");
+            (
+                Some(Reply::json(
+                    409,
+                    json!({
+                        "error": "the protected zones are not clear, so the command was not sent",
+                        "blockedBy": "safety_zones",
+                        "zones": reason,
+                    }),
+                )),
+                "zones_blocked",
+                reason.clone(),
+            )
+        }
+        ZonesDecision::Unavailable { reason } => {
+            state.stats.zones_unavailable += 1;
+            state.stats.zones_last = Some("unavailable");
+            eprintln!("[hil-bridge] safety zones: command for joint {joint:?} at {position} refused, no usable state: {reason}");
+            (
+                Some(Reply::json(
+                    503,
+                    json!({
+                        "error": "the zone monitor gave no recent state, so the command was not sent",
+                        "blockedBy": "safety_zones_unavailable",
+                    }),
+                )),
+                "zones_unavailable",
+                reason.clone(),
+            )
+        }
+    };
+    let entry = AuditEntry {
+        at_ms: now_ms(),
+        phase: "safety_zones",
+        caller: info.caller.clone(),
+        peer: info.peer.clone(),
+        authenticated: info.authenticated,
+        mode: "real",
+        joint: joint.to_string(),
+        position,
+        certificate_key_id: None,
+        certificate_nonce: None,
+        kind: Some(kind),
+        delivered: refusal.is_some().then_some(false),
+        reason: Some(reason),
+    };
+    if let Err(e) = state.audit.record(entry) {
+        state.stats.audit_failures += 1;
+        eprintln!("[hil-bridge] audit failure for a zones check: {e}");
+    }
+    drop(state);
+    if refusal.is_some() {
+        record_refusal(&shared.config, joint, position);
+    }
+    refusal
+}
+
+#[derive(Deserialize, Default)]
+struct ReplayRequest {
+    /// The session to read back (default: the one this bridge is recording).
+    session: Option<String>,
+    from_ms: Option<u64>,
+    to_ms: Option<u64>,
+}
+
+/// `POST /replay`: reads a recorded session back from the data lake and runs its commands again in SIMULATION mode, whatever mode they were
+/// recorded in: a replay never reaches the real hardware. Each command is also compared with the limits of the URDF the bridge has now, so a
+/// change of the robot description shows which recorded commands would no longer be accepted.
+fn handle_replay(raw: &str, shared: &Shared) -> Reply {
+    let Some(recorder) = shared.config.recorder.as_ref() else {
+        return Reply::json(404, json!({"error": "no session store configured"}));
+    };
+    let req: ReplayRequest = if raw.trim().is_empty() {
+        ReplayRequest::default()
+    } else {
+        match serde_json::from_str(raw) {
+            Ok(r) => r,
+            Err(e) => {
+                shared.lock().stats.malformed_requests += 1;
+                return Reply::json(
+                    400,
+                    json!({"error": format!("malformed request JSON: {e}")}),
+                );
+            }
+        }
+    };
+    let session = req
+        .session
+        .clone()
+        .unwrap_or_else(|| recorder.session().to_string());
+    if !crate::session_record::valid_session(&session) {
+        shared.lock().stats.malformed_requests += 1;
+        return Reply::json(
+            400,
+            json!({"error": "the session name may only have letters, digits, '.', '_' and '-' (up to 64)"}),
+        );
+    }
+    let max_points = if shared.config.replay_max_points == 0 {
+        DEFAULT_REPLAY_MAX_POINTS
+    } else {
+        shared.config.replay_max_points
+    };
+    // The read of the lake happens outside the lock: it can take as long as its timeout.
+    let commands = match crate::session_record::fetch_commands(
+        recorder.lake(),
+        &session,
+        req.from_ms,
+        req.to_ms,
+        max_points,
+    ) {
+        Ok(commands) => commands,
+        Err(reason) => {
+            shared.lock().stats.replay_failures += 1;
+            return Reply::json(502, json!({"error": reason}));
+        }
+    };
+    let bridge = Bridge::new(Mode::Simulation);
+    let mut real_unused = RecordingSink::default();
+    let mut twin_sim = shared.config.sim_robot.as_deref().cloned();
+    let mut recording = RecordingSink::default();
+    let sim_sink: &mut dyn CommandSink = match twin_sim.as_mut() {
+        Some(sim) => sim,
+        None => &mut recording,
+    };
+    let mut by_outcome: std::collections::BTreeMap<&'static str, u64> = Default::default();
+    let (mut real, mut delivered, mut failed, mut regressions) = (0u64, 0u64, 0u64, 0u64);
+    let mut outside = Vec::new();
+    for recorded in &commands {
+        if recorded.real {
+            real += 1;
+        }
+        *by_outcome
+            .entry(
+                recorded
+                    .outcome
+                    .map(crate::session_record::outcome_name)
+                    .unwrap_or("unknown"),
+            )
+            .or_insert(0) += 1;
+        let command = JointCommand {
+            joint: recorded.joint.clone(),
+            position: recorded.position,
+        };
+        if command.validate().is_err() {
+            failed += 1;
+            continue;
+        }
+        if let Some(limits) = &shared.config.limits {
+            if let Err(reason) = limits.check(&command.joint, command.position) {
+                if recorded.outcome == Some(0) {
+                    regressions += 1;
+                }
+                if outside.len() < 100 {
+                    outside.push(json!({
+                        "atMs": recorded.at_ms,
+                        "joint": recorded.joint,
+                        "position": recorded.position,
+                        "recordedOutcome": recorded.outcome.map(crate::session_record::outcome_name),
+                        "reason": reason,
+                    }));
+                }
+            }
+        }
+        match bridge.route_command(command, None, &mut real_unused, sim_sink) {
+            RouteOutcome::SentSimulation => delivered += 1,
+            _ => failed += 1,
+        }
+    }
+    shared.lock().stats.replays += 1;
+    Reply::json(
+        200,
+        json!({
+            "session": session,
+            "commands": commands.len(),
+            "recordedAsReal": real,
+            "byOutcome": by_outcome,
+            "replayedToSimulation": delivered,
+            "simulationFailures": failed,
+            "limitsChecked": shared.config.limits.is_some(),
+            "outsideLimits": outside,
+            "regressions": regressions,
+            "firstAtMs": commands.first().map(|c| c.at_ms),
+            "lastAtMs": commands.last().map(|c| c.at_ms),
+            "realHardwareTouched": false,
+        }),
+    )
 }
 
 /// `POST /measured`: the controller read a joint back; tell the twin where it really is. Not gated by the interlock (it is observation),
@@ -1217,6 +1633,15 @@ fn handle_measured(raw: &str, shared: &Shared, info: &RequestInfo) -> Reply {
     if let Err(reason) = command.validate() {
         shared.lock().stats.malformed_requests += 1;
         return Reply::json(400, json!({"error": reason}));
+    }
+    if let Some(recorder) = &shared.config.recorder {
+        recorder.record(
+            Event::Measured {
+                joint: command.joint.clone(),
+                position: command.position,
+            },
+            now_ms(),
+        );
     }
     if shared.config.twin.is_none() {
         return Reply::json(
@@ -1667,7 +2092,7 @@ mod tests {
         );
         // no joint, position or certificate is ever a metric
         assert!(
-            !second.contains("shoulder") && !second.contains("0.5"),
+            !second.contains("shoulder") && !second.contains("position"),
             "{second}"
         );
     }
@@ -2799,5 +3224,226 @@ Content-Length: 500
         let shadow = std::sync::Arc::new(crate::collision_shadow::ScriptedShadow::answering(true));
         let port = start_with(shadow_config(&twin, &shadow));
         assert_eq!(stats_json(port)["shadowEnforce"], false);
+    }
+
+    // ---- the zone monitor as a condition of the interlock, the session record, the replay and the new metrics ----
+
+    fn now_plus(ms: i64) -> u64 {
+        (now_ms() as i64 + ms) as u64
+    }
+
+    fn zones_config(
+        zones: &std::sync::Arc<crate::safety_zones::tests::ScriptedZones>,
+    ) -> ServerConfig {
+        let zones: std::sync::Arc<dyn ZonesState> = zones.clone();
+        ServerConfig {
+            safety_zones: Some(zones),
+            ..certified_config()
+        }
+    }
+
+    #[test]
+    fn a_real_command_goes_on_only_while_the_zones_say_a_recent_ready() {
+        let zones = std::sync::Arc::new(crate::safety_zones::tests::ScriptedZones::saying(
+            "READY",
+            Some(now_plus(0)),
+        ));
+        let port = start_with(zones_config(&zones));
+        let (status, _) = post_with(
+            port,
+            "/route",
+            "",
+            &route_body("real", Some(&fresh_certificate(NONCE_A))),
+        );
+        assert_eq!(status, 200);
+        let stats = stats_json(port);
+        assert_eq!(stats["zonesChecked"], 1);
+        assert_eq!(stats["zonesLast"], "clear");
+        assert_eq!(stats["routedReal"], 1);
+        // a simulation command is not asked about
+        post_with(port, "/route", "", &route_body("simulation", None));
+        assert_eq!(stats_json(port)["zonesChecked"], 1);
+    }
+
+    #[test]
+    fn zones_that_are_not_clear_stale_or_silent_refuse_the_command_before_its_certificate_is_used()
+    {
+        use crate::safety_zones::tests::ScriptedZones;
+        for (zones, status, blocked_by) in [
+            (
+                ScriptedZones::saying("DANGER", Some(now_plus(0))),
+                409,
+                "safety_zones",
+            ),
+            (
+                ScriptedZones::saying("INHIBITED", Some(now_plus(0))),
+                409,
+                "safety_zones",
+            ),
+            (
+                ScriptedZones::saying("READY", Some(now_plus(-60_000))),
+                503,
+                "safety_zones_unavailable",
+            ),
+            (
+                ScriptedZones::saying("READY", None),
+                503,
+                "safety_zones_unavailable",
+            ),
+            (ScriptedZones::failing(), 503, "safety_zones_unavailable"),
+        ] {
+            let zones = std::sync::Arc::new(zones);
+            let port = start_with(zones_config(&zones));
+            let certificate = fresh_certificate(NONCE_A);
+            let (got, body) =
+                post_with(port, "/route", "", &route_body("real", Some(&certificate)));
+            assert_eq!(got, status, "{body}");
+            assert!(body.contains(blocked_by), "{body}");
+            let stats = stats_json(port);
+            assert_eq!(stats["routedReal"], 0);
+            // the interlock never saw the certificate, so it was not used up
+            assert_eq!(stats["uncertified"], 0);
+            assert_eq!(
+                stats["zonesBlocked"].as_u64().unwrap()
+                    + stats["zonesUnavailable"].as_u64().unwrap(),
+                1
+            );
+            let metrics = get_with(port, "/metrics", "").1;
+            crate::metrics::tests::assert_valid_exposition(&metrics);
+            assert!(
+                metrics.contains("hydra_umc_hil_bridge_refused_total{reason=\"safety_zones"),
+                "{metrics}"
+            );
+            let audit = get_with(port, "/audit", "").1;
+            assert!(audit.contains("safety_zones"), "{audit}");
+        }
+    }
+
+    #[test]
+    fn route_latency_is_a_histogram_per_mode() {
+        let port = start_with(certified_config());
+        post_with(port, "/route", "", &route_body("simulation", None));
+        post_with(port, "/route", "", &route_body("real", None));
+        let metrics = get_with(port, "/metrics", "").1;
+        crate::metrics::tests::assert_valid_exposition(&metrics);
+        assert!(
+            metrics.contains("hydra_umc_hil_bridge_route_seconds_count{mode=\"simulation\"} 1"),
+            "{metrics}"
+        );
+        assert!(
+            metrics.contains("hydra_umc_hil_bridge_route_seconds_count{mode=\"real\"} 1"),
+            "{metrics}"
+        );
+        assert!(
+            metrics.contains("hydra_umc_hil_bridge_refused_total{reason=\"certificate\"} 1"),
+            "{metrics}"
+        );
+    }
+
+    fn lake_config(peer_addr: &str, replay: bool) -> ServerConfig {
+        let recorder = crate::session_record::Recorder::start(
+            "bench",
+            crate::session_record::Lake {
+                addr: peer_addr.to_string(),
+                token: None,
+                timeout: Duration::from_secs(2),
+            },
+            replay,
+        )
+        .unwrap();
+        ServerConfig {
+            recorder: Some(Arc::new(recorder)),
+            ..certified_config()
+        }
+    }
+
+    #[test]
+    fn decided_commands_and_measured_positions_are_recorded_in_the_lake_with_their_outcome() {
+        let peer =
+            crate::http_client::tests::canned_peer(vec![(202, String::new(), "{}".to_string())]);
+        let port = start_with(lake_config(&peer.addr, false));
+        post_with(
+            port,
+            "/route",
+            "",
+            &route_body("real", Some(&fresh_certificate(NONCE_A))),
+        );
+        post_with(port, "/route", "", &route_body("real", None));
+        post_with(
+            port,
+            "/measured",
+            "",
+            r#"{"joint":"shoulder","position":0.25}"#,
+        );
+        let mut seen = String::new();
+        for _ in 0..100 {
+            seen = peer.requests.lock().unwrap().join("\n");
+            if seen.matches("\"sourceId\":\"hil-bench\"").count() >= 3 {
+                break;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        assert!(seen.contains("\"cmd.shoulder\":1.0"), "{seen}");
+        assert!(seen.contains("\"out.shoulder\":0.0"), "{seen}");
+        assert!(seen.contains("\"out.shoulder\":2.0"), "{seen}");
+        assert!(
+            seen.contains("hil_measured") && seen.contains("\"pos.shoulder\":0.25"),
+            "{seen}"
+        );
+        assert!(!seen.contains("signature"), "no certificate in the lake");
+        let stats = stats_json(port);
+        assert_eq!(stats["sessionRecord"], "bench");
+        assert_eq!(stats["replayEnabled"], false);
+    }
+
+    #[test]
+    fn replay_is_off_without_the_switch_and_runs_a_session_again_in_simulation_with_it() {
+        let session = serde_json::json!([
+            {"field":"cmd.shoulder","timestamp":10,"value":0.5},
+            {"field":"out.shoulder","timestamp":10,"value":0.0},
+            {"field":"real.shoulder","timestamp":10,"value":1.0},
+            {"field":"cmd.shoulder","timestamp":11,"value":9.0},
+            {"field":"out.shoulder","timestamp":11,"value":0.0},
+            {"field":"real.shoulder","timestamp":11,"value":1.0},
+            {"field":"cmd.elbow","timestamp":12,"value":0.1},
+            {"field":"out.elbow","timestamp":12,"value":2.0},
+            {"field":"real.elbow","timestamp":12,"value":0.0},
+        ])
+        .to_string();
+        let peer = crate::http_client::tests::canned_peer(vec![(200, String::new(), session)]);
+        let off = start_with(lake_config(&peer.addr, false));
+        let (status, body) = post_with(off, "/replay", "", "{}");
+        assert_eq!(status, 404, "{body}");
+        assert!(body.contains("--replay"));
+
+        let mut config = lake_config(&peer.addr, true);
+        config.limits = Some(JointLimits::from_urdf(ARM_URDF).unwrap());
+        let port = start_with(config);
+        let (status, body) = post_with(port, "/replay", "", r#"{"session":"bench"}"#);
+        assert_eq!(status, 200, "{body}");
+        let value: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(value["commands"], 3);
+        assert_eq!(value["recordedAsReal"], 2);
+        assert_eq!(value["replayedToSimulation"], 3);
+        assert_eq!(value["realHardwareTouched"], false);
+        assert_eq!(value["byOutcome"]["sent_real"], 2);
+        assert_eq!(value["limitsChecked"], true);
+        // the real order that went through before is now outside the range of the URDF: a regression
+        assert!(value["regressions"].as_u64().unwrap() >= 1, "{body}");
+        let stats = stats_json(port);
+        assert_eq!(stats["replays"], 1);
+        assert_eq!(stats["routedReal"], 0);
+        let (bad, _) = post_with(port, "/replay", "", r#"{"session":"a b"}"#);
+        assert_eq!(bad, 400);
+    }
+
+    #[test]
+    fn a_replay_that_cannot_read_the_lake_is_a_502_and_counted() {
+        let peer =
+            crate::http_client::tests::canned_peer(vec![(503, String::new(), "{}".to_string())]);
+        let port = start_with(lake_config(&peer.addr, true));
+        let (status, _) = post_with(port, "/replay", "", "{}");
+        assert_eq!(status, 502);
+        assert_eq!(stats_json(port)["replayFailures"], 1);
     }
 }

@@ -18,7 +18,7 @@ GPL-3.0-or-later - see LICENSE
   <img src="https://img.shields.io/badge/License-GPL%203.0--or--later-blue.svg" alt="GPL 3.0 or later">
   <img src="https://img.shields.io/badge/Rust-2021-DEA584.svg" alt="Rust">
   <img src="https://img.shields.io/badge/Safety-Interlock-gated-red.svg" alt="Safety">
-  <img src="https://img.shields.io/badge/Tests-149%20passing-2ea44f.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-172%20passing-2ea44f.svg" alt="Tests">
   <img src="https://img.shields.io/badge/Version-0.1.3-0f6cbd.svg" alt="Version">
   <img src="https://img.shields.io/badge/Maturity-functional-0F6CBD.svg" alt="Maturity">
 </p>
@@ -35,7 +35,7 @@ GPL-3.0-or-later - see LICENSE
 |---|---|
 | 版本 | `0.1.3` |
 | 成熟度 | 可用 |
-| 测试 | 149 (`cargo test`) |
+| 测试 | 172 (`cargo test`) |
 | 技术栈 | Rust / hardware-in-the-loop I/O |
 | 目标 | HYDRA-UMC 工作单元的 Raspberry Pi CM5 |
 | 真实硬件 | 仅模拟：使用模拟器、替身或仿真测试；此版本没有在真实硬件上运行的记录 |
@@ -51,7 +51,7 @@ GPL-3.0-or-later - see LICENSE
 | 领域 | 状态 | 在这里的含义 |
 |---|---|---|
 | 软件 | 🟡 | 主要用途可用；上面的诚实性检查列出了仍然缺少的内容 |
-| 测试 | 🟢 | 149 项自动测试，每次变更都会运行 |
+| 测试 | 🟢 | 172 项自动测试，每次变更都会运行 |
 | 真实硬件 | 🟠 | 仅模拟：使用模拟器、替身或仿真测试；此版本没有在真实硬件上运行的记录 |
 | 集成 | 🟠 | 在 CM5 测试台上与其他服务一起运行，其消息遵循 SDK 的共享契约 |
 | 安全性 | 🟠 | 有一些保护措施（令牌、对输入的限制），但并非都有测试覆盖；项目之外无人审查过 |
@@ -162,6 +162,8 @@ flowchart LR
 | `HYDRA_UMC_HIL_BRIDGE_AUDIT_LOG`, `--audit-log` | 仅环形缓冲 | 同时把审计记录保存到此文件 |
 | `--certificate-max-age-ms`, `--workers` | `2000`, `8` | 证书的最大时效；工作线程数（1 到 256） |
 
+新增三个开关，默认全部关闭。`--safety-zones-url`（可配合 `--safety-zones-token-file`、`--safety-zones-timeout-ms` 和 `--safety-zones-max-age-ms`，默认 5000）把 HYDRA-UMC-SAFETY-ZONES 的状态变为联锁的又一个条件：只有区域监视器最近报告了 `READY`，真实命令才会继续；任何其他状态、无响应或过旧的状态都会拒绝它（`409`、`503`）。`--record-url`（可配合 `--record-session` 和 `--record-token-file`）把每个已决定的命令和每个测得的位置作为一个会话发送到 HYDRA-UMC-DATALAKE，且从不等待它；`--replay` 增加 `POST /replay`，读回一个会话并仅在模拟模式下重新运行，同时与当前 URDF 的限值比较。`GET /metrics` 还给出每次拒绝的原因（`hydra_umc_hil_bridge_refused_total`），以及按模式统计的 `/route` 响应时间直方图。
+
 ## 🚀 快速开始
 
 需要较新的稳定版 Rust 工具链（`cargo`）；Python 3 仅用于项目工具。
@@ -174,7 +176,7 @@ cargo run --release -- serve --port 8113 --token-file token.txt   # real mode al
 
 ## 🧪 测试
 
-运行 `cargo test` 会执行 149 个 Rust 测试，它们位于 `src/` 的模块内，不需要硬件和网络。
+运行 `cargo test` 会执行 172 个 Rust 测试，它们位于 `src/` 的模块内，不需要硬件和网络。
 
 CI 运行 `HYDRA_UMC_CI=1 python tools/ci_validate.py`，检查清单、文档、八个 README 和图片。
 

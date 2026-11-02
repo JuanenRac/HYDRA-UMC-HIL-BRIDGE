@@ -15,16 +15,22 @@
 //! module docs for what is still out of scope (any real gRPC/WebSocket
 //! transport - see `Cargo.toml`).
 
+// the stats document of the server is one large json! literal
+#![recursion_limit = "256"]
+
 mod access;
 mod audit;
 mod bridge;
 mod certificate;
 mod collision_shadow;
+mod http_client;
 mod interlock;
 mod limits;
 mod metrics;
 mod protocol;
+mod safety_zones;
 mod server;
+mod session_record;
 mod twin_link;
 mod watchdog;
 
@@ -338,6 +344,151 @@ fn load_collision_shadow(
     )))
 }
 
+/// A bearer token for a service the bridge asks, from a file or from the environment; None when neither is given (the service may be open on
+/// loopback). A token that is there must have at least 16 characters.
+fn optional_token(
+    args: &[String],
+    file_flag: &str,
+    env_name: &str,
+) -> Result<Option<String>, String> {
+    let token = match find_flag(args, file_flag) {
+        Some(path) => Some(
+            std::fs::read_to_string(&path)
+                .map_err(|e| format!("cannot read {file_flag}: {e}"))?
+                .trim()
+                .to_string(),
+        ),
+        None => env::var(env_name)
+            .ok()
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty()),
+    };
+    match token {
+        Some(t) if t.len() < 16 => Err(format!(
+            "the token of {file_flag} must have at least 16 characters"
+        )),
+        other => Ok(other),
+    }
+}
+
+/// A whole number of milliseconds from `flag`, between `low` and `high`; `default` when the flag is not there.
+fn millis_flag(
+    args: &[String],
+    flag: &str,
+    default: u64,
+    low: u64,
+    high: u64,
+) -> Result<u64, String> {
+    match find_flag(args, flag) {
+        None => Ok(default),
+        Some(raw) => match raw.parse::<u64>() {
+            Ok(ms) if (low..=high).contains(&ms) => Ok(ms),
+            _ => Err(format!(
+                "{flag} must be a whole number from {low} to {high}, got {raw}"
+            )),
+        },
+    }
+}
+
+/// `--safety-zones-url http://HOST:PORT` (off by default): the state of the protected zones is one more condition of the interlock of the
+/// real mode. `--safety-zones-token-file` (or HYDRA_UMC_HIL_BRIDGE_ZONES_TOKEN), `--safety-zones-timeout-ms` (default 500) and
+/// `--safety-zones-max-age-ms` (default 5000, the oldest state that is believed).
+type ZonesSetting = (std::sync::Arc<dyn safety_zones::ZonesState>, u64);
+
+fn load_safety_zones(args: &[String]) -> Result<Option<ZonesSetting>, String> {
+    let Some(url) = find_flag(args, "--safety-zones-url") else {
+        for flag in [
+            "--safety-zones-token-file",
+            "--safety-zones-timeout-ms",
+            "--safety-zones-max-age-ms",
+        ] {
+            if find_flag(args, flag).is_some() {
+                return Err(format!("{flag} needs --safety-zones-url"));
+            }
+        }
+        return Ok(None);
+    };
+    let addr = http_client::parse_base_url(&url, "safety zones")?;
+    let token = optional_token(
+        args,
+        "--safety-zones-token-file",
+        "HYDRA_UMC_HIL_BRIDGE_ZONES_TOKEN",
+    )?;
+    let timeout_ms = millis_flag(args, "--safety-zones-timeout-ms", 500, 10, 10_000)?;
+    let max_age_ms = millis_flag(args, "--safety-zones-max-age-ms", 5_000, 100, 60_000)?;
+    Ok(Some((
+        std::sync::Arc::new(safety_zones::HttpZonesState {
+            addr,
+            token,
+            timeout: std::time::Duration::from_millis(timeout_ms),
+        }),
+        max_age_ms,
+    )))
+}
+
+/// `--record-url http://HOST:PORT` (off by default): the commands that are decided and the positions that are read back are recorded in
+/// HYDRA-UMC-DATALAKE as one session (`--record-session NAME`, default made from the clock). `--record-token-file` (or
+/// HYDRA_UMC_HIL_BRIDGE_RECORD_TOKEN) is the ingest token of the lake and `--record-timeout-ms` (default 1000) how long it waits for it.
+/// `--replay` additionally turns on `POST /replay` (reads a session back and runs it again in simulation); `--replay-max-points`
+/// (default 20000) bounds what it reads.
+fn load_recorder(
+    args: &[String],
+) -> Result<(Option<std::sync::Arc<session_record::Recorder>>, usize), String> {
+    let replay_max_points = match find_flag(args, "--replay-max-points") {
+        None => 0,
+        Some(raw) => match raw.parse::<usize>() {
+            Ok(n) if (1..=200_000).contains(&n) => n,
+            _ => {
+                return Err(format!(
+                    "--replay-max-points must be a whole number from 1 to 200000, got {raw}"
+                ))
+            }
+        },
+    };
+    let Some(url) = find_flag(args, "--record-url") else {
+        for flag in [
+            "--record-token-file",
+            "--record-timeout-ms",
+            "--record-session",
+            "--replay-max-points",
+        ] {
+            if find_flag(args, flag).is_some() {
+                return Err(format!("{flag} needs --record-url"));
+            }
+        }
+        if has_flag(args, "--replay") {
+            return Err(
+                "--replay needs --record-url: the session is read from the data lake".to_string(),
+            );
+        }
+        return Ok((None, 0));
+    };
+    let addr = http_client::parse_base_url(&url, "data lake")?;
+    let token = optional_token(
+        args,
+        "--record-token-file",
+        "HYDRA_UMC_HIL_BRIDGE_RECORD_TOKEN",
+    )?;
+    let timeout_ms = millis_flag(args, "--record-timeout-ms", 1_000, 10, 30_000)?;
+    let session = find_flag(args, "--record-session").unwrap_or_else(|| {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        format!("s{now}")
+    });
+    let recorder = session_record::Recorder::start(
+        &session,
+        session_record::Lake {
+            addr,
+            token,
+            timeout: std::time::Duration::from_millis(timeout_ms),
+        },
+        has_flag(args, "--replay"),
+    )?;
+    Ok((Some(std::sync::Arc::new(recorder)), replay_max_points))
+}
+
 /// `--sim-robot` (off by default): deliver the commands to the simulated robot of HYDRA-UMC-TWIN (started with `--sim-config`) instead of a
 /// recording. It needs the link to the twin (`--twin-url` and its token), which it uses.
 fn load_sim_robot(
@@ -460,6 +611,21 @@ fn run_serve(args: &[String]) -> ExitCode {
         }
     };
 
+    let safety_zones = match load_safety_zones(args) {
+        Ok(zones) => zones,
+        Err(e) => {
+            eprintln!("[hil-bridge] fatal: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let (recorder, replay_max_points) = match load_recorder(args) {
+        Ok(recorder) => recorder,
+        Err(e) => {
+            eprintln!("[hil-bridge] fatal: {e}");
+            return ExitCode::from(2);
+        }
+    };
+
     let sim_robot = match load_sim_robot(args) {
         Ok(sim) => sim,
         Err(e) => {
@@ -492,6 +658,15 @@ fn run_serve(args: &[String]) -> ExitCode {
                 Some(_) if has_flag(args, "--collision-shadow-enforce") => eprintln!("[hil-bridge] --collision-shadow-enforce: the twin is asked BEFORE each real command is routed; a predicted contact, or no answer inside the wait budget, refuses the command (never sent unchecked)"),
                 Some(_) => eprintln!("[hil-bridge] --collision-shadow: after each delivered real command the twin is asked whether it predicts a contact; the answer is recorded and never blocks anything"),
                 None => eprintln!("[hil-bridge] no --collision-shadow: the collision prediction of the twin is not asked"),
+            }
+            match &safety_zones {
+                Some((_, max_age_ms)) => eprintln!("[hil-bridge] --safety-zones-url: a real command is forwarded only while the zone monitor says READY and said it at most {max_age_ms} ms ago; any other state, or no answer, refuses it (the physical stop stays with the firmware)"),
+                None => eprintln!("[hil-bridge] no --safety-zones-url: the state of the protected zones is not part of the decision"),
+            }
+            match &recorder {
+                Some(r) if r.replay => eprintln!("[hil-bridge] --record-url: session {:?} is recorded in the data lake; POST /replay is ON (it runs a session again in simulation, never in real mode)", r.session()),
+                Some(r) => eprintln!("[hil-bridge] --record-url: session {:?} is recorded in the data lake; no --replay, POST /replay is off", r.session()),
+                None => eprintln!("[hil-bridge] no --record-url: nothing is recorded"),
             }
             let fault_injection = has_flag(args, "--fault-injection");
             if fault_injection {
@@ -534,6 +709,10 @@ fn run_serve(args: &[String]) -> ExitCode {
                         && has_flag(args, "--collision-shadow-enforce"),
                     collision_shadow,
                     sim_robot,
+                    zones_max_age_ms: safety_zones.as_ref().map_or(0, |(_, age)| *age),
+                    safety_zones: safety_zones.map(|(zones, _)| zones),
+                    recorder,
+                    replay_max_points,
                 },
             );
             ExitCode::SUCCESS
@@ -608,5 +787,77 @@ mod tests {
         assert!(load_collision_shadow(&args(&["--collision-shadow-timeout-ms", "100"])).is_err());
         let no_twin = load_collision_shadow(&args(&["--collision-shadow"])).unwrap_err();
         assert!(no_twin.contains("--twin-url"), "{no_twin}");
+    }
+
+    #[test]
+    fn the_safety_zones_are_off_and_their_options_need_the_url() {
+        assert!(load_safety_zones(&args(&[])).unwrap().is_none());
+        for flag in [
+            "--safety-zones-timeout-ms",
+            "--safety-zones-max-age-ms",
+            "--safety-zones-token-file",
+        ] {
+            assert!(load_safety_zones(&args(&[flag, "500"])).is_err(), "{flag}");
+        }
+        let (_, age) = load_safety_zones(&args(&["--safety-zones-url", "http://127.0.0.1:18300"]))
+            .unwrap()
+            .unwrap();
+        assert_eq!(age, 5_000);
+        let (_, age) = load_safety_zones(&args(&[
+            "--safety-zones-url",
+            "http://127.0.0.1:18300",
+            "--safety-zones-max-age-ms",
+            "2000",
+        ]))
+        .unwrap()
+        .unwrap();
+        assert_eq!(age, 2_000);
+        for bad in ["50", "70000", "soon"] {
+            let a = args(&[
+                "--safety-zones-url",
+                "http://127.0.0.1:18300",
+                "--safety-zones-max-age-ms",
+                bad,
+            ]);
+            assert!(load_safety_zones(&a).is_err(), "{bad}");
+        }
+        assert!(load_safety_zones(&args(&["--safety-zones-url", "https://h:1"])).is_err());
+    }
+
+    #[test]
+    fn the_session_record_is_off_and_replay_needs_it() {
+        assert!(load_recorder(&args(&[])).unwrap().0.is_none());
+        for flags in [
+            vec!["--replay"],
+            vec!["--record-session", "a"],
+            vec!["--record-timeout-ms", "100"],
+            vec!["--replay-max-points", "10"],
+        ] {
+            assert!(load_recorder(&args(&flags)).is_err(), "{flags:?}");
+        }
+        let (recorder, max) = load_recorder(&args(&[
+            "--record-url",
+            "http://127.0.0.1:1",
+            "--record-session",
+            "bench-1",
+            "--replay",
+            "--replay-max-points",
+            "500",
+        ]))
+        .unwrap();
+        let recorder = recorder.unwrap();
+        assert_eq!(recorder.session(), "bench-1");
+        assert!(recorder.replay);
+        assert_eq!(max, 500);
+        assert!(load_recorder(&args(&[
+            "--record-url",
+            "http://127.0.0.1:1",
+            "--record-session",
+            "a b"
+        ]))
+        .is_err());
+        let (default_session, _) =
+            load_recorder(&args(&["--record-url", "http://127.0.0.1:1"])).unwrap();
+        assert!(!default_session.unwrap().replay);
     }
 }

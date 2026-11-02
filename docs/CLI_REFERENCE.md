@@ -306,3 +306,27 @@ change; only what is behind it is a model.
 `GET /metrics` answers the counters in the text format of Prometheus (version 0.0.4 of the exposition format): the same numbers as `GET /stats` (commands routed, blocked,
 refused and failed, the watchdog, the link to the twin, the shadow predictions) and the version. Unlike `/stats` it needs the token when the bridge has one, because it tells how
 many real commands were issued and refused. No joint, position, certificate, token or address is a metric.
+
+## Safety zones, session record and replay
+
+All of this is off unless its flag is given.
+
+| Flag | Meaning |
+|---|---|
+| `--safety-zones-url http://HOST:PORT` | Ask `GET /state` of HYDRA-UMC-SAFETY-ZONES before a real command is routed. Only a `READY` that is at most `--safety-zones-max-age-ms` old (100 to 60000, default 5000) lets the command go on. |
+| `--safety-zones-token-file FILE` | Bearer token of the zone monitor (also `HYDRA_UMC_HIL_BRIDGE_ZONES_TOKEN`), at least 16 characters. |
+| `--safety-zones-timeout-ms N` | How long to wait for the monitor (10 to 10000, default 500). |
+| `--record-url http://HOST:PORT` | Record the commands that are decided and the positions that are read back in HYDRA-UMC-DATALAKE. |
+| `--record-session NAME` | Name of the session (letters, digits, `.`, `_`, `-`; default made from the clock). |
+| `--record-token-file FILE` | Ingest token of the lake (also `HYDRA_UMC_HIL_BRIDGE_RECORD_TOKEN`). |
+| `--record-timeout-ms N` | How long each batch may take (10 to 30000, default 1000). |
+| `--replay` | Turn on `POST /replay` (needs `--record-url`). |
+| `--replay-max-points N` | The most points a replay reads from the lake (1 to 200000, default 20000). |
+
+A refused command answers `409` with `blockedBy: safety_zones` when the zones are not clear, and `503` with `blockedBy: safety_zones_unavailable` when the monitor gave no state, an old state or a state with no readable time. The twin is asked after the monitor, so a refusal by the monitor ends the request.
+
+A recorded command is one sample of `kind` `hil_command` with the fields `cmd.<joint>` (the position), `out.<joint>` (0 sent to the real robot, 1 sent in simulation, 2 blocked by the interlock, 3 transport failure, 4 refused before routing) and `real.<joint>` (1 for the real mode). A position read back is a sample of `kind` `hil_measured` with `pos.<joint>`. Every sample of a session has its own millisecond.
+
+`POST /replay` takes `{"session": "NAME", "from_ms": N, "to_ms": N}` (all optional; the session defaults to the one being recorded) and answers the number of commands, how many were recorded as real, the count by outcome, how many were replayed to the simulation, the commands that now fall outside the limits of the URDF (`outsideLimits`, at most 100) and `regressions`, the real orders that were delivered and would now be blocked. `realHardwareTouched` is always `false`.
+
+`GET /metrics` adds `hydra_umc_hil_bridge_refused_total{reason}`, `hydra_umc_hil_bridge_route_seconds` (a histogram per mode), the counters of the zone checks and, with `--record-url`, `hydra_umc_hil_bridge_session_recorded_total`, `_dropped_total` and `_failed_total`.

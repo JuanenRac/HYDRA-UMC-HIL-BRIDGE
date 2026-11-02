@@ -18,7 +18,7 @@ GPL-3.0-or-later - see LICENSE
   <img src="https://img.shields.io/badge/License-GPL%203.0--or--later-blue.svg" alt="GPL 3.0 or later">
   <img src="https://img.shields.io/badge/Rust-2021-DEA584.svg" alt="Rust">
   <img src="https://img.shields.io/badge/Safety-Interlock-gated-red.svg" alt="Safety">
-  <img src="https://img.shields.io/badge/Tests-149%20passing-2ea44f.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-172%20passing-2ea44f.svg" alt="Tests">
   <img src="https://img.shields.io/badge/Version-0.1.3-0f6cbd.svg" alt="Version">
   <img src="https://img.shields.io/badge/Maturity-functional-0F6CBD.svg" alt="Maturity">
 </p>
@@ -35,7 +35,7 @@ GPL-3.0-or-later - see LICENSE
 |---|---|
 | Version | `0.1.3` |
 | Maturité | Fonctionnel |
-| Tests | 149 (`cargo test`) |
+| Tests | 172 (`cargo test`) |
 | Technologie | Rust / hardware-in-the-loop I/O |
 | Cible | Le Raspberry Pi CM5 d'une cellule HYDRA-UMC |
 | Sur matériel réel | Simulé seulement : testé avec des émulateurs, des doubles de test ou des simulateurs ; aucune exécution sur du matériel réel n'est consignée pour cette version |
@@ -51,7 +51,7 @@ Chaque ligne est une partie de ce dépôt et le feu dit où elle en est aujourd'
 | Domaine | État | Ce que cela veut dire ici |
 |---|---|---|
 | Logiciel | 🟡 | Fonctionne pour son usage principal ; la vérification d'honnêteté ci-dessus liste ce qui manque encore |
-| Tests | 🟢 | 149 tests automatiques, exécutés à chaque modification |
+| Tests | 🟢 | 172 tests automatiques, exécutés à chaque modification |
 | Matériel réel | 🟠 | Simulé seulement : testé avec des émulateurs, des doubles de test ou des simulateurs ; aucune exécution sur du matériel réel n'est consignée pour cette version |
 | Intégration | 🟠 | Il fonctionne avec les autres services sur le banc d'essai CM5 et ses messages suivent les contrats partagés du SDK |
 | Sécurité | 🟠 | Quelques protections existent (un jeton, des limites sur ce qu'il accepte) mais elles ne sont pas toutes couvertes par des tests ; personne hors du projet ne les a relues |
@@ -162,6 +162,8 @@ Une API HTTP sur `127.0.0.1:8113` et une ligne de commande, qui atteignent la m�
 | `HYDRA_UMC_HIL_BRIDGE_AUDIT_LOG`, `--audit-log` | anneau seulement | garder aussi les entrées d'audit dans ce fichier |
 | `--certificate-max-age-ms`, `--workers` | `2000`, `8` | âge maximal d'un certificat ; fils de travail (1 à 256) |
 
+Trois interrupteurs de plus, tous désactivés par défaut. `--safety-zones-url` (avec `--safety-zones-token-file`, `--safety-zones-timeout-ms` et `--safety-zones-max-age-ms`, 5000 par défaut) fait de l'état de HYDRA-UMC-SAFETY-ZONES une condition de plus du verrouillage : une commande réelle ne passe que tant que le moniteur de zones dit `READY` et l'a dit récemment ; tout autre état, le silence ou un état ancien la refuse (`409`, `503`). `--record-url` (avec `--record-session` et `--record-token-file`) envoie chaque commande décidée et chaque position mesurée à HYDRA-UMC-DATALAKE comme une session, sans jamais l'attendre ; `--replay` ajoute `POST /replay`, qui relit une session et la rejoue en mode simulation seulement, en la comparant aux limites de l'URDF actuel. `GET /metrics` donne aussi le motif de chaque refus (`hydra_umc_hil_bridge_refused_total`) et le temps de réponse de `/route`, par mode, sous forme d'histogramme.
+
 ## 🚀 Démarrage rapide
 
 Nécessite une chaîne d'outils Rust stable récente (`cargo`) ; Python 3 n'est nécessaire que pour les outils du projet.
@@ -174,7 +176,7 @@ cargo run --release -- serve --port 8113 --token-file token.txt   # real mode al
 
 ## 🧪 Tests
 
-149 tests Rust s'exécutent avec `cargo test` ; ils sont dans les modules de `src/`. Ils n'ont besoin ni de matériel ni de réseau.
+172 tests Rust s'exécutent avec `cargo test` ; ils sont dans les modules de `src/`. Ils n'ont besoin ni de matériel ni de réseau.
 
 La CI exécute `HYDRA_UMC_CI=1 python tools/ci_validate.py`, qui vérifie le manifeste, les documents, les huit README et les images.
 
