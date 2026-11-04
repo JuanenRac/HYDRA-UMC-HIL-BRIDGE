@@ -199,6 +199,8 @@ only checks the shape of the values.
 `{"mirrored": true}` or `{"mirrored": false, "error": "..."}`, both `200`;
 `400` on malformed JSON or an invalid `joint`/`position` (same checks as `/route`).
 
+**`GET /health`** — closed by default: it answers `404` like a route that does not exist. With `serve --health-open` (or `HYDRA_UMC_HIL_BRIDGE_HEALTH_OPEN=1`) it answers `200` `{"status": "ok", "service": ..., "version": ...}` to a caller on loopback; a caller that is not on loopback must present the bearer token of the bridge (`401` otherwise), and a service without a token never answers it. It is checked before the token gate and carries no path, configuration or secret.
+
 **`GET /stats`** — `200` with the process-lifetime counters: `role`,
 `routedReal`, `routedSimulation`, `blockedByInterlock`, `transportFailures`,
 `mirrored`, `mirrorFailures`, `malformedRequests` and `notFound`.

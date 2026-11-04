@@ -14,6 +14,23 @@ use std::net::IpAddr;
 
 pub const TOKEN_ENV: &str = "HYDRA_UMC_HIL_BRIDGE_TOKEN";
 pub const MIN_TOKEN_LENGTH: usize = 16;
+/// The environment variable that opens `GET /health` (1, true, yes or on).
+pub const HEALTH_OPEN_ENV: &str = "HYDRA_UMC_HIL_BRIDGE_HEALTH_OPEN";
+
+/// Whether the operator opened `GET /health`: the flag of the command line, or the environment value set to 1/true/yes/on.
+pub fn health_open_requested(flag: bool, env_value: Option<&str>) -> bool {
+    flag || matches!(
+        env_value.map(|v| v.trim().to_ascii_lowercase()).as_deref(),
+        Some("1" | "true" | "yes" | "on")
+    )
+}
+
+/// True when the peer address of a request (`ip:port`, `[ip]:port`) is on this machine; anything that does not parse is not loopback.
+pub fn peer_is_loopback(peer: &str) -> bool {
+    peer.parse::<std::net::SocketAddr>()
+        .map(|a| a.ip().is_loopback())
+        .unwrap_or(false)
+}
 
 /// True for `localhost` and the loopback addresses; a wildcard (0.0.0.0, ::) or any other address is not loopback.
 pub fn is_loopback(addr: &str) -> bool {
@@ -152,5 +169,27 @@ mod tests {
         assert!(!bearer_matches(Some(TOKEN), TOKEN));
         assert!(!bearer_matches(Some("Bearer "), TOKEN));
         assert!(!bearer_matches(Some(&format!("Bearer {TOKEN}x")), TOKEN));
+    }
+
+    #[test]
+    fn the_health_route_opens_only_on_purpose() {
+        assert!(!health_open_requested(false, None));
+        assert!(!health_open_requested(false, Some("")));
+        assert!(!health_open_requested(false, Some("0")));
+        assert!(!health_open_requested(false, Some("maybe")));
+        assert!(health_open_requested(true, None));
+        for word in ["1", "true", "YES", " on "] {
+            assert!(health_open_requested(false, Some(word)), "{word}");
+        }
+    }
+
+    #[test]
+    fn a_peer_is_loopback_only_when_its_address_says_so() {
+        assert!(peer_is_loopback("127.0.0.1:5000"));
+        assert!(peer_is_loopback("[::1]:5000"));
+        assert!(!peer_is_loopback("192.0.2.7:5000"));
+        assert!(!peer_is_loopback("0.0.0.0:5000"));
+        assert!(!peer_is_loopback("unknown"));
+        assert!(!peer_is_loopback(""));
     }
 }

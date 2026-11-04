@@ -23,6 +23,6 @@
   "service": {
     "port": 8113,
     "systemd_unit": "hydra-umc-hil-bridge.service",
-    "health_path": "/stats"
+    "health_path": "/health"
   }
 }

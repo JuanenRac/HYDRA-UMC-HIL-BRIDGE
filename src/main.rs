@@ -699,6 +699,10 @@ fn run_serve(args: &[String]) -> ExitCode {
                 server::ServerConfig {
                     fault_injection,
                     token,
+                    health_open: access::health_open_requested(
+                        has_flag(args, "--health-open"),
+                        env::var(access::HEALTH_OPEN_ENV).ok().as_deref(),
+                    ),
                     interlock,
                     audit_log,
                     watchdog,

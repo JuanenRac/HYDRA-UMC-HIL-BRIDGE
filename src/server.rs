@@ -205,6 +205,9 @@ pub struct InterlockConfig {
 pub struct ServerConfig {
     pub fault_injection: bool,
     pub token: Option<String>,
+    /// `--health-open`: opens `GET /health`. Closed (the default) the route answers 404 like a route that does not exist; open it answers a
+    /// caller on loopback, and any other caller needs the token (a bridge without a token never answers one).
+    pub health_open: bool,
     pub interlock: InterlockConfig,
     /// Where the audit records of the real orders are appended (None: only the last ones are kept, in memory).
     pub audit_log: Option<std::path::PathBuf>,
@@ -424,6 +427,33 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
     let config = &shared.config;
     let path = request.url().split('?').next().unwrap_or("").to_string();
     let mut authenticated = false;
+
+    if path == "/health" && request.method() == &Method::Get {
+        // before the token gate: the route is closed unless the operator opened it, and then it names the service and its version only
+        let peer = request
+            .remote_addr()
+            .map(|a| a.to_string())
+            .unwrap_or_default();
+        let presented = header_value(&request, "authorization");
+        let reply = if !config.health_open {
+            Reply::json(404, json!({"error": "not found"}))
+        } else if crate::access::peer_is_loopback(&peer)
+            || config
+                .token
+                .as_deref()
+                .is_some_and(|t| bearer_matches(presented.as_deref(), t))
+        {
+            Reply::json(
+                200,
+                json!({"status": "ok", "service": "hydra-umc-hil-bridge", "version": env!("CARGO_PKG_VERSION")}),
+            )
+        } else {
+            Reply::json(401, json!({"error": "a valid bearer token is required"}))
+                .with("WWW-Authenticate", "Bearer")
+        };
+        reply.send(request);
+        return;
+    }
 
     if let Some(expected) = &config.token {
         let health_probe = path == "/stats" && request.method() == &Method::Get;
@@ -3445,5 +3475,49 @@ Content-Length: 500
         let (status, _) = post_with(port, "/replay", "", "{}");
         assert_eq!(status, 502);
         assert_eq!(stats_json(port)["replayFailures"], 1);
+    }
+
+    fn start_test_server_health(health_open: bool, token: Option<&str>) -> u16 {
+        let server = bind("127.0.0.1:0").expect("bind on an OS-assigned port must succeed");
+        let port = server
+            .server_addr()
+            .to_ip()
+            .expect("tiny_http always binds a real IP socket for an http:// server")
+            .port();
+        let config = ServerConfig {
+            health_open,
+            token: token.map(str::to_string),
+            interlock: InterlockConfig {
+                allow_unsigned_risk: true,
+                ..InterlockConfig::default()
+            },
+            ..ServerConfig::default()
+        };
+        thread::spawn(move || run_with_config(server, config));
+        port
+    }
+
+    #[test]
+    fn health_is_closed_by_default_even_with_a_token() {
+        let port = start_test_server_health(false, None);
+        assert_eq!(get(port, "/health").0, 404);
+        let port = start_test_server_health(false, Some(TEST_TOKEN));
+        let header = format!("Authorization: Bearer {TEST_TOKEN}\r\n");
+        assert_eq!(get_status_with_headers(port, "/health", ""), 404);
+        assert_eq!(get_status_with_headers(port, "/health", &header), 404);
+    }
+
+    #[test]
+    fn open_health_names_the_service_and_the_version_on_loopback() {
+        let port = start_test_server_health(true, Some(TEST_TOKEN));
+        let (status, body) = get(port, "/health");
+        assert_eq!(status, 200);
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["status"], "ok");
+        assert_eq!(json["service"], "hydra-umc-hil-bridge");
+        assert_eq!(json["version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(json.as_object().unwrap().len(), 3);
+        // the other routes keep asking for the token
+        assert_eq!(get_status_with_headers(port, "/nope", ""), 401);
     }
 }
