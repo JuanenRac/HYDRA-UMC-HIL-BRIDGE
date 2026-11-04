@@ -24,5 +24,8 @@
     "port": 8113,
     "systemd_unit": "hydra-umc-hil-bridge.service",
     "health_path": "/health"
-  }
+  },
+  "depends_on": [
+    "HYDRA-UMC-TWIN"
+  ]
 }
