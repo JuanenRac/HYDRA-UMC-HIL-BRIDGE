@@ -23,6 +23,8 @@ mod audit;
 mod bridge;
 mod certificate;
 mod collision_shadow;
+#[allow(dead_code)] // only the HMAC of the signed token is used
+mod hmac;
 mod http_client;
 mod interlock;
 mod limits;
@@ -30,6 +32,7 @@ mod metrics;
 mod protocol;
 mod safety_zones;
 mod server;
+mod server_identity;
 mod session_record;
 mod twin_link;
 mod watchdog;
@@ -557,9 +560,28 @@ fn run_serve(args: &[String]) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    if let Some(problem) = access::bind_problem(&addr, &token) {
-        eprintln!("[hil-bridge] fatal: {problem}");
-        return ExitCode::from(2);
+    // The signing key of HYDRA-UMC-SERVER, from a file: with it a signed token of the server is accepted, nothing is open (GET /health and GET /stats
+    // included) and a viewer may read but not command. Off unless it is given.
+    let identity_key = match find_flag(args, "--identity-key-file")
+        .or_else(|| env::var("HYDRA_UMC_HIL_BRIDGE_IDENTITY_KEY_FILE").ok())
+        .filter(|path| !path.is_empty())
+    {
+        Some(path) => match server_identity::load_identity_key(&path) {
+            Ok(key) => Some(key),
+            Err(e) => {
+                eprintln!("[hil-bridge] fatal: --identity-key-file: {e}");
+                return ExitCode::from(2);
+            }
+        },
+        None => None,
+    };
+    if identity_key.is_none() {
+        if let Some(problem) = access::bind_problem(&addr, &token) {
+            eprintln!("[hil-bridge] fatal: {problem}");
+            return ExitCode::from(2);
+        }
+    } else {
+        eprintln!("[hil-bridge] tokens of HYDRA-UMC-SERVER accepted: every route needs an identity, a viewer may read but not command");
     }
 
     let interlock = match load_interlock(args) {
@@ -699,6 +721,7 @@ fn run_serve(args: &[String]) -> ExitCode {
                 server::ServerConfig {
                     fault_injection,
                     token,
+                    identity_key,
                     health_open: access::health_open_requested(
                         has_flag(args, "--health-open"),
                         env::var(access::HEALTH_OPEN_ENV).ok().as_deref(),

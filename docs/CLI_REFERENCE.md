@@ -211,6 +211,8 @@ There is no authentication - same as every other loopback-only internal API
 on the CM5 (see the systemd unit's own `RestrictAddressFamilies`/
 `ProtectSystem` hardening for what it relies on instead).
 
+`serve --identity-key-file FILE` (or `HYDRA_UMC_HIL_BRIDGE_IDENTITY_KEY_FILE`; off by default) accepts the signed token of HYDRA-UMC-SERVER next to the token of the service: a viewer may read but not change, and a request with no credential is refused even on loopback, `GET /health` and `GET /stats` included.
+
 ## Exit codes
 
 | Code | Meaning |

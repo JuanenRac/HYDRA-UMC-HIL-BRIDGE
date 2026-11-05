@@ -205,6 +205,9 @@ pub struct InterlockConfig {
 pub struct ServerConfig {
     pub fault_injection: bool,
     pub token: Option<String>,
+    /// The signing key of HYDRA-UMC-SERVER (`--identity-key-file`, see `server_identity.rs`). With it a signed token of the server is accepted next to the token, a
+    /// viewer may read but not command, and nothing is open, not even `GET /health` or `GET /stats`. None: the earlier rules.
+    pub identity_key: Option<Vec<u8>>,
     /// `--health-open`: opens `GET /health`. Closed (the default) the route answers 404 like a route that does not exist; open it answers a
     /// caller on loopback, and any other caller needs the token (a bridge without a token never answers one).
     pub health_open: bool,
@@ -437,6 +440,22 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
         let presented = header_value(&request, "authorization");
         let reply = if !config.health_open {
             Reply::json(404, json!({"error": "not found"}))
+        } else if let Some(key) = &config.identity_key {
+            if crate::server_identity::allowed(
+                presented.as_deref(),
+                request.method().as_str(),
+                config.token.as_deref(),
+                key,
+                crate::server_identity::now_seconds(),
+            ) {
+                Reply::json(
+                    200,
+                    json!({"status": "ok", "service": "hydra-umc-hil-bridge", "version": env!("CARGO_PKG_VERSION")}),
+                )
+            } else {
+                Reply::json(401, json!({"error": "a valid identity is required"}))
+                    .with("WWW-Authenticate", "Bearer")
+            }
         } else if crate::access::peer_is_loopback(&peer)
             || config
                 .token
@@ -455,7 +474,23 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
         return;
     }
 
-    if let Some(expected) = &config.token {
+    if let Some(key) = &config.identity_key {
+        let presented = header_value(&request, "authorization");
+        authenticated = crate::server_identity::allowed(
+            presented.as_deref(),
+            request.method().as_str(),
+            config.token.as_deref(),
+            key,
+            crate::server_identity::now_seconds(),
+        );
+        if !authenticated {
+            shared.lock().stats.unauthorized += 1;
+            Reply::json(401, json!({"error": "a valid identity is required"}))
+                .with("WWW-Authenticate", "Bearer")
+                .send(request);
+            return;
+        }
+    } else if let Some(expected) = &config.token {
         let health_probe = path == "/stats" && request.method() == &Method::Get;
         let presented = header_value(&request, "authorization");
         authenticated = bearer_matches(presented.as_deref(), expected);
@@ -2146,6 +2181,65 @@ mod tests {
             ),
             404
         );
+    }
+
+    /// A token of HYDRA-UMC-SERVER signed with `key`, valid for ten minutes.
+    fn server_token(key: &[u8], role: &str) -> String {
+        fn b64(data: &[u8]) -> String {
+            const TABLE: &[u8; 64] =
+                b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+            let mut out = String::new();
+            for chunk in data.chunks(3) {
+                let n = chunk
+                    .iter()
+                    .enumerate()
+                    .fold(0u32, |acc, (i, b)| acc | (u32::from(*b) << (16 - 8 * i)));
+                for i in 0..=chunk.len() {
+                    out.push(TABLE[((n >> (18 - 6 * i)) & 63) as usize] as char);
+                }
+            }
+            out
+        }
+        let head = b64(br#"{"alg":"HS256","typ":"JWT"}"#);
+        let exp = crate::server_identity::now_seconds() as u64 + 600;
+        let body = b64(format!(r#"{{"username":"ana","role":"{role}","exp":{exp}}}"#).as_bytes());
+        let mac = crate::hmac::hmac_sha256(key, format!("{head}.{body}").as_bytes());
+        format!("{head}.{body}.{}", b64(&mac))
+    }
+
+    #[test]
+    fn with_the_identity_of_the_server_nothing_is_open_and_a_viewer_only_reads() {
+        let key = b"0123456789abcdef0123456789abcdef".to_vec();
+        let port = start_with(ServerConfig {
+            identity_key: Some(key.clone()),
+            health_open: true,
+            ..Default::default()
+        });
+        let body = r#"{"mode":"simulation","joint":"shoulder","position":0.5}"#;
+        for path in ["/stats", "/health"] {
+            assert_eq!(get_status_with_headers(port, path, ""), 401, "GET {path}");
+            let viewer = format!("Authorization: Bearer {}\r\n", server_token(&key, "viewer"));
+            assert_eq!(
+                get_status_with_headers(port, path, &viewer),
+                200,
+                "GET {path} as a viewer"
+            );
+        }
+        let viewer = format!(
+            "Content-Type: application/json\r\nAuthorization: Bearer {}\r\n",
+            server_token(&key, "viewer")
+        );
+        assert_eq!(post_raw(port, "/route", &viewer, body.as_bytes()), 401);
+        let operator = format!(
+            "Content-Type: application/json\r\nAuthorization: Bearer {}\r\n",
+            server_token(&key, "operator")
+        );
+        assert_eq!(post_raw(port, "/route", &operator, body.as_bytes()), 200);
+        let forged = format!(
+            "Authorization: Bearer {}\r\n",
+            server_token(b"another-key-of-more-than-32-characters!", "admin")
+        );
+        assert_eq!(get_status_with_headers(port, "/stats", &forged), 401);
     }
 
     #[test]

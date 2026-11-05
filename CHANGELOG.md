@@ -4,6 +4,8 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+- **The identity of HYDRA-UMC-SERVER, off by default (`serve --identity-key-file FILE`, or `HYDRA_UMC_HIL_BRIDGE_IDENTITY_KEY_FILE`):** the service verifies the signed token (HS256 JWT with `exp`, `username` and `role`) that the server issues at login and accepts it next to its own token. A viewer may read but not change, and a request with no credential is refused even on loopback, `GET /health` and `GET /stats` included: nothing is open. An address that is not loopback no longer needs a token of the service. The key is the signing key of the server, read from a file that only the group of the service may read, at least 32 characters; without the switch nothing changes.
+
 - **A uniform `GET /health`, closed by default, and the manifest declares it:** `serve --health-open` (or `HYDRA_UMC_HIL_BRIDGE_HEALTH_OPEN=1`) makes the bridge answer `GET /health` with `{"status": "ok", "service": ..., "version": ...}`, the same body in every service of the family; without the switch the route answers `404` like a route that does not exist, with or without a token. A caller that is not on loopback must present the bearer token of the bridge (`401` otherwise), and a service without a token never answers it. The body carries no path, configuration or secret, and `service.health_path` of the manifest is `/health` now (the health checks ask `/stats` after a `404`). 4 tests.
 
 ## [0.1.4] - Recording and replay of HIL sessions through the data lake, the state of the safety zones in the interlock and Prometheus metrics
