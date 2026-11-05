@@ -122,7 +122,7 @@ impl TrustedKeys {
         Ok(TrustedKeys { keys })
     }
 
-    fn find(&self, key_id: &str) -> Option<&VerifyingKey> {
+    pub(crate) fn find(&self, key_id: &str) -> Option<&VerifyingKey> {
         self.keys
             .iter()
             .find(|(id, _)| id == key_id)

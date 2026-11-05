@@ -35,6 +35,7 @@ mod server;
 mod server_identity;
 mod session_record;
 mod twin_link;
+mod twin_pass;
 mod watchdog;
 
 use std::env;
@@ -234,6 +235,56 @@ fn load_interlock(args: &[String]) -> Result<server::InterlockConfig, String> {
         || env::var("HYDRA_UMC_HIL_BRIDGE_ALLOW_UNSIGNED_RISK")
             .map(|v| v == "1")
             .unwrap_or(false);
+    Ok(config)
+}
+
+/// The pass verdict of the twin as a condition of moving the real robot (see `twin_pass.rs`): `--require-twin-pass` turns it on and locks it on for
+/// as long as the bridge runs (also HYDRA_UMC_HIL_BRIDGE_REQUIRE_TWIN_PASS=1), `--twin-pass-file` keeps the value a change from HYDRA-UMC-SERVER sets
+/// (`{"require_twin_pass": true}`), and `--twin-robot-id` names the robot a verdict must be for (also HYDRA_UMC_HIL_BRIDGE_TWIN_ROBOT_ID). Off by default.
+fn load_twin_pass(
+    args: &[String],
+    interlock: &server::InterlockConfig,
+) -> Result<server::TwinPassConfig, String> {
+    let mut config = server::TwinPassConfig {
+        robot_id: find_flag(args, "--twin-robot-id")
+            .or_else(|| env::var("HYDRA_UMC_HIL_BRIDGE_TWIN_ROBOT_ID").ok())
+            .unwrap_or_default()
+            .trim()
+            .to_string(),
+        ..server::TwinPassConfig::default()
+    };
+    if let Some(path) = find_flag(args, "--twin-pass-file") {
+        let path = std::path::PathBuf::from(path);
+        match std::fs::read_to_string(&path) {
+            Ok(text) => {
+                let value: serde_json::Value = serde_json::from_str(&text)
+                    .map_err(|e| format!("{}: not JSON ({e})", path.display()))?;
+                config.required = value
+                    .get("require_twin_pass")
+                    .and_then(serde_json::Value::as_bool)
+                    .ok_or_else(|| {
+                        format!(
+                            "{}: expected {{\"require_twin_pass\": true or false}}",
+                            path.display()
+                        )
+                    })?;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("cannot read {}: {e}", path.display())),
+        }
+        config.file = Some(path);
+    }
+    if has_flag(args, "--require-twin-pass")
+        || env::var("HYDRA_UMC_HIL_BRIDGE_REQUIRE_TWIN_PASS")
+            .map(|v| v == "1")
+            .unwrap_or(false)
+    {
+        config.required = true;
+        config.locked = true;
+    }
+    if config.required && (interlock.trusted_keys.is_empty() || config.robot_id.is_empty()) {
+        return Err("the pass verdict of the twin is required, so --twin-public-key-file and --twin-robot-id must be set: without them every real command would be refused".to_string());
+    }
     Ok(config)
 }
 
@@ -591,6 +642,13 @@ fn run_serve(args: &[String]) -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    let twin_pass = match load_twin_pass(args, &interlock) {
+        Ok(twin_pass) => twin_pass,
+        Err(message) => {
+            eprintln!("[hil-bridge] fatal: {message}");
+            return ExitCode::from(2);
+        }
+    };
     let watchdog = match load_watchdog(args) {
         Ok(watchdog) => watchdog,
         Err(message) => {
@@ -670,7 +728,7 @@ fn run_serve(args: &[String]) -> ExitCode {
                 }
             );
             eprintln!(
-                "[hil-bridge] POST /route, POST /mirror, POST /measured, GET /stats, GET /audit"
+                "[hil-bridge] POST /route, POST /mirror, POST /measured, GET /stats, GET /audit, GET and POST /settings/twin-pass"
             );
             match &twin {
                 Some(_) => eprintln!("[hil-bridge] the position of the real joints is reported to the twin (--twin-url); GET /stats says whether the last report arrived"),
@@ -698,6 +756,11 @@ fn run_serve(args: &[String]) -> ExitCode {
                 eprintln!("[hil-bridge] no twin public key (--twin-public-key-file): the real mode blocks every command until one is configured");
             } else {
                 eprintln!("[hil-bridge] real commands need a certificate from the twin: trusted key(s) {:?}, at most {} ms old", interlock.trusted_keys.key_ids(), interlock.policy.max_age_ms);
+            }
+            if twin_pass.required {
+                eprintln!("[hil-bridge] a real command also needs a pass verdict of the twin for its trajectory (robot {:?}){}", twin_pass.robot_id, if twin_pass.locked { "; --require-twin-pass: the switch cannot be turned off while the bridge runs" } else { "" });
+            } else {
+                eprintln!("[hil-bridge] the pass verdict of the twin is not required (require_twin_pass is off; --require-twin-pass or POST /settings/twin-pass turns it on)");
             }
             if interlock.allow_unsigned_risk {
                 eprintln!("[hil-bridge] WARNING: --allow-unsigned-risk is ON: a risk report written by the caller is believed in real mode (bench use only)");
@@ -727,6 +790,7 @@ fn run_serve(args: &[String]) -> ExitCode {
                         env::var(access::HEALTH_OPEN_ENV).ok().as_deref(),
                     ),
                     interlock,
+                    twin_pass,
                     audit_log,
                     watchdog,
                     limits,

@@ -34,6 +34,7 @@ use crate::session_record::{Event, Recorder};
 use crate::twin_link::{
     deliver, JointStateReport, MirrorOutcome, StateSequencer, StateSource, TwinStateSink,
 };
+use crate::twin_pass::{Proof as TwinPassProof, VerdictLedger};
 use crate::watchdog::{Leases, Validity, WatchdogConfig};
 
 fn json_header() -> Header {
@@ -114,6 +115,9 @@ struct RouteRequest {
     risk: Option<TwinRiskReport>,
     /// The risk report signed by HYDRA-UMC-TWIN for exactly this command (see `certificate.rs`).
     certificate: Option<Certificate>,
+    /// The pass verdict of the twin for the trajectory this command belongs to, with the samples it was made for (see `twin_pass.rs`). Read only
+    /// when the switch `require_twin_pass` is on.
+    twin_pass: Option<TwinPassProof>,
     #[serde(default)]
     transport: TransportConfig,
     /// The validity window of the command (see `watchdog.rs`): when it was issued, how long it is good for, and its sequence number.
@@ -157,6 +161,8 @@ struct Stats {
     not_found: u64,
     unauthorized: u64,
     uncertified: u64,
+    /// Real commands refused for lack of a valid pass verdict of the twin (the switch `require_twin_pass`).
+    twin_pass_refused: u64,
     audit_failures: u64,
     stale_commands: u64,
     outside_limits: u64,
@@ -200,6 +206,20 @@ pub struct InterlockConfig {
     pub allow_unsigned_risk: bool,
 }
 
+/// The pass verdict of the twin as a condition of moving the real robot (see `twin_pass.rs`). The switch itself lives in the state of the server, so
+/// it can be changed while the bridge runs (`POST /settings/twin-pass`); this is where it starts and what it is tied to.
+#[derive(Debug, Default, Clone)]
+pub struct TwinPassConfig {
+    /// The value at start.
+    pub required: bool,
+    /// Started with `--require-twin-pass`: the switch cannot be turned off while the bridge runs.
+    pub locked: bool,
+    /// `--twin-pass-file`: where a change of the switch is kept (None: only in memory).
+    pub file: Option<std::path::PathBuf>,
+    /// `--twin-robot-id`: the robot a verdict must be for. Without it the switch cannot be turned on.
+    pub robot_id: String,
+}
+
 /// Everything `run_with_config` needs besides the socket.
 #[derive(Debug, Default, Clone)]
 pub struct ServerConfig {
@@ -212,6 +232,7 @@ pub struct ServerConfig {
     /// caller on loopback, and any other caller needs the token (a bridge without a token never answers one).
     pub health_open: bool,
     pub interlock: InterlockConfig,
+    pub twin_pass: TwinPassConfig,
     /// Where the audit records of the real orders are appended (None: only the last ones are kept, in memory).
     pub audit_log: Option<std::path::PathBuf>,
     /// The lease of the real commands (see `watchdog.rs`).
@@ -324,6 +345,9 @@ struct State {
     twin_seq: StateSequencer,
     /// The report of a real command that was just delivered, made under the lock and sent after it is released.
     pending_twin: Option<JointStateReport>,
+    /// The switch `require_twin_pass` as it is now, and the points of the trajectories already sent under each verdict.
+    twin_pass_required: bool,
+    twin_pass_ledger: VerdictLedger,
 }
 
 struct Shared {
@@ -386,6 +410,8 @@ pub fn run_with_config(server: Server, config: ServerConfig) {
         },
         twin_seq: StateSequencer::default(),
         pending_twin: None,
+        twin_pass_required: config.twin_pass.required,
+        twin_pass_ledger: VerdictLedger::default(),
     };
     let shared = Arc::new(Shared {
         config,
@@ -519,6 +545,8 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
                 "notFound": stats.not_found,
                 "unauthorized": stats.unauthorized,
                 "uncertified": stats.uncertified,
+                "requireTwinPass": state.twin_pass_required,
+                "blockedByTwinPass": stats.twin_pass_refused,
                 "auditFailures": stats.audit_failures,
                 "staleCommands": stats.stale_commands,
                 "outsideLimits": stats.outside_limits,
@@ -790,17 +818,30 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
         Reply::json(200, body).send(request);
         return;
     }
+    if path == "/settings/twin-pass" && request.method() == &Method::Get {
+        let presented = header_value(&request, "authorization");
+        handle_twin_pass_settings(&Method::Get, "", shared, presented.as_deref()).send(request);
+        return;
+    }
     if request.method() != &Method::Post {
         shared.lock().stats.not_found += 1;
         if matches!(
             path.as_str(),
-            "/route" | "/mirror" | "/measured" | "/replay" | "/stats" | "/audit"
+            "/route"
+                | "/mirror"
+                | "/measured"
+                | "/replay"
+                | "/stats"
+                | "/audit"
+                | "/settings/twin-pass"
         ) {
             Reply::json(405, json!({"error": "method not allowed"}))
                 .with(
                     "Allow",
                     if path == "/stats" || path == "/audit" {
                         "GET"
+                    } else if path == "/settings/twin-pass" {
+                        "GET, POST"
                     } else {
                         "POST"
                     },
@@ -881,6 +922,7 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
                             twin_linked: config.twin.is_some(),
                             sim_robot: config.sim_robot.as_deref(),
                             recorder: config.recorder.as_deref(),
+                            twin_pass_robot_id: &config.twin_pass.robot_id,
                         },
                         &info,
                     );
@@ -907,6 +949,12 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
                 }
             }
             "/measured" => handle_measured(&raw, shared, &info),
+            "/settings/twin-pass" => handle_twin_pass_settings(
+                &Method::Post,
+                &raw,
+                shared,
+                header_value(&request, "authorization").as_deref(),
+            ),
             "/replay" if config.recorder.as_ref().is_some_and(|r| r.replay) => {
                 handle_replay(&raw, shared)
             }
@@ -1016,6 +1064,8 @@ struct RouteContext<'a> {
     sim_robot: Option<&'a crate::twin_link::TwinSimSink>,
     /// `--record-url`: where the decided commands are recorded.
     recorder: Option<&'a Recorder>,
+    /// The robot a pass verdict of the twin must be for (`--twin-robot-id`).
+    twin_pass_robot_id: &'a str,
 }
 
 fn audit_entry(
@@ -1054,6 +1104,8 @@ fn handle_route(raw: &str, state: &mut State, context: &RouteContext, info: &Req
         leases,
         twin_seq,
         pending_twin,
+        twin_pass_required,
+        twin_pass_ledger,
         ..
     } = state;
     let fault_injection = context.fault_injection;
@@ -1094,6 +1146,8 @@ fn handle_route(raw: &str, state: &mut State, context: &RouteContext, info: &Req
         );
     }
     let bridge = Bridge::new(req.mode);
+    // The point of the passed trajectory this command matched, when the switch is on (remembered once the command went).
+    let mut twin_pass_matched: Option<(String, u64, usize)> = None;
 
     // A real order is accounted for BEFORE anything else happens to it: if the record cannot be written, it goes no further.
     if req.mode == Mode::Real {
@@ -1151,10 +1205,33 @@ fn handle_route(raw: &str, state: &mut State, context: &RouteContext, info: &Req
                 stats.outside_limits += 1;
                 RouteOutcome::BlockedByInterlock { reason }
             } else {
+                // With the switch on, the trajectory of the command must have a pass verdict of the twin. It is looked at before the certificate, so a
+                // command without it does not use up the certificate it carries; the point of the trajectory is marked only when the command went.
+                let twin_pass_check = if *twin_pass_required {
+                    Some(crate::twin_pass::check(
+                        req.twin_pass.as_ref(),
+                        &command,
+                        &context.interlock.trusted_keys,
+                        context.twin_pass_robot_id,
+                        now_ms(),
+                        twin_pass_ledger,
+                    ))
+                } else {
+                    None
+                };
+                twin_pass_matched = match &twin_pass_check {
+                    Some(Ok(matched)) => {
+                        Some((matched.nonce.clone(), matched.valid_until_ms, matched.index))
+                    }
+                    _ => None,
+                };
                 let report = if let Err(reason) =
                     leases.check(&command.joint, validity.as_ref(), now_ms())
                 {
                     stats.stale_commands += 1;
+                    Err(reason)
+                } else if let Some(Err(reason)) = twin_pass_check {
+                    stats.twin_pass_refused += 1;
                     Err(reason)
                 } else if let Some(certificate) = &req.certificate {
                     verify(
@@ -1186,6 +1263,9 @@ fn handle_route(raw: &str, state: &mut State, context: &RouteContext, info: &Req
         }
     };
     if req.mode == Mode::Real && outcome == RouteOutcome::SentReal {
+        if let Some((nonce, valid_until_ms, index)) = &twin_pass_matched {
+            twin_pass_ledger.mark(nonce, *valid_until_ms, *index, now_ms());
+        }
         if let Some(validity) = &validity {
             leases.grant(&command.joint, command.position, validity);
         }
@@ -1244,6 +1324,134 @@ fn handle_route(raw: &str, state: &mut State, context: &RouteContext, info: &Req
             "X-Delivered",
             if outcome.delivered() { "true" } else { "false" },
         )
+}
+
+/// The body of `POST /settings/twin-pass`: the new value of the switch and the confirmation, nothing else.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TwinPassSettingsRequest {
+    #[serde(rename = "requireTwinPass")]
+    require_twin_pass: bool,
+    confirm: Option<bool>,
+}
+
+/// The switch `require_twin_pass` as the settings route reports it.
+fn twin_pass_view(
+    config: &ServerConfig,
+    required: bool,
+    changed: Option<bool>,
+) -> serde_json::Value {
+    let mut view = json!({
+        "requireTwinPass": required,
+        "locked": config.twin_pass.locked,
+        "persisted": config.twin_pass.file.is_some(),
+        "ready": !config.interlock.trusted_keys.is_empty() && !config.twin_pass.robot_id.is_empty(),
+        "robotIdSet": !config.twin_pass.robot_id.is_empty(),
+        "keysConfigured": !config.interlock.trusted_keys.is_empty(),
+        "canChange": config.identity_key.is_some(),
+    });
+    if let (Some(changed), Some(map)) = (changed, view.as_object_mut()) {
+        map.insert("changed".to_string(), json!(changed));
+    }
+    view
+}
+
+/// Keeps the value of the switch where `--twin-pass-file` says, whole or not at all.
+fn write_twin_pass_file(path: &std::path::Path, required: bool) -> std::io::Result<()> {
+    let text = json!({"require_twin_pass": required}).to_string();
+    let temporary = path.with_extension("tmp");
+    std::fs::write(&temporary, text)?;
+    std::fs::rename(&temporary, path)
+}
+
+/// `GET` and `POST /settings/twin-pass`. Reading is for whoever may reach the bridge. Changing is for an administrator of HYDRA-UMC-SERVER
+/// (a valid signed token with the role `admin`, which needs `--identity-key-file`), needs `"confirm": true` in either direction, cannot turn
+/// the switch off when the bridge was started with `--require-twin-pass`, and cannot turn it on while the twin key or the robot is not set
+/// (every real command would be refused for a reason the operator could not fix from here).
+fn handle_twin_pass_settings(
+    method: &Method,
+    raw: &str,
+    shared: &Shared,
+    authorization: Option<&str>,
+) -> Reply {
+    let config = &shared.config;
+    if method == &Method::Get {
+        let required = shared.lock().twin_pass_required;
+        return Reply::json(200, twin_pass_view(config, required, None));
+    }
+    let token = authorization
+        .and_then(|v| v.split_once(' '))
+        .filter(|(scheme, _)| *scheme == "Bearer")
+        .map(|(_, token)| token.trim());
+    let is_admin = match (&config.identity_key, token) {
+        (Some(key), Some(token)) => {
+            crate::server_identity::verify_token(token, key, crate::server_identity::now_seconds())
+                .map(|identity| identity.role == "admin")
+                .unwrap_or(false)
+        }
+        _ => false,
+    };
+    if !is_admin {
+        shared.lock().stats.unauthorized += 1;
+        return Reply::json(
+            403,
+            json!({"error": "changing this switch needs an administrator of HYDRA-UMC-SERVER (a signed token with the role admin; start the bridge with --identity-key-file)"}),
+        );
+    }
+    let request: TwinPassSettingsRequest = match serde_json::from_str(raw) {
+        Ok(r) => r,
+        Err(_) => {
+            shared.lock().stats.malformed_requests += 1;
+            return Reply::json(
+                400,
+                json!({"error": "the body must be an object with requireTwinPass (true or false) and confirm: true"}),
+            );
+        }
+    };
+    if request.confirm != Some(true) {
+        return Reply::json(
+            400,
+            json!({"error": "changing this switch needs confirm: true", "code": "CONFIRMATION_REQUIRED"}),
+        );
+    }
+    let mut state = shared.lock();
+    let before = state.twin_pass_required;
+    if !request.require_twin_pass && config.twin_pass.locked {
+        return Reply::json(
+            409,
+            json!({"error": "the bridge was started with --require-twin-pass: the switch cannot be turned off while it runs", "code": "SETTING_REFUSED"}),
+        );
+    }
+    if request.require_twin_pass
+        && (config.interlock.trusted_keys.is_empty() || config.twin_pass.robot_id.is_empty())
+    {
+        return Reply::json(
+            409,
+            json!({"error": "turning the switch on needs the twin key (--twin-public-key-file) and the robot (--twin-robot-id)", "code": "SETTING_REFUSED"}),
+        );
+    }
+    if let Some(path) = &config.twin_pass.file {
+        if let Err(e) = write_twin_pass_file(path, request.require_twin_pass) {
+            eprintln!("[hil-bridge] could not keep the switch require_twin_pass: {e}");
+            return Reply::json(
+                409,
+                json!({"error": "the value could not be kept in the file of --twin-pass-file, so it was not changed", "code": "SETTING_REFUSED"}),
+            );
+        }
+    }
+    state.twin_pass_required = request.require_twin_pass;
+    eprintln!(
+        "[hil-bridge] require_twin_pass is now {} (it was {})",
+        request.require_twin_pass, before
+    );
+    Reply::json(
+        200,
+        twin_pass_view(
+            config,
+            request.require_twin_pass,
+            Some(before != request.require_twin_pass),
+        ),
+    )
 }
 
 /// Sends one report to the twin (outside the lock), counts it and leaves an audit record. A report that failed does not undo the command it
@@ -3613,5 +3821,342 @@ Content-Length: 500
         assert_eq!(json.as_object().unwrap().len(), 3);
         // the other routes keep asking for the token
         assert_eq!(get_status_with_headers(port, "/nope", ""), 401);
+    }
+
+    // ---- the pass verdict of the twin as a condition of the real mode (twin_pass.rs) ----
+
+    const SAMPLES_JSON: &str =
+        r#"[{"t":0.0,"joints":{"shoulder":1.0}},{"t":0.1,"joints":{"shoulder":1.5}}]"#;
+
+    /// The answer of the twin for `SAMPLES_JSON`, signed with the key of these tests, and the samples it was made for.
+    fn twin_pass_json(verdict: &str, robot: &str) -> String {
+        let samples: Vec<crate::twin_pass::Sample> = serde_json::from_str(SAMPLES_JSON).unwrap();
+        let sha = crate::twin_pass::trajectory_sha256(&samples);
+        let mut v = crate::twin_pass::Verdict {
+            verdict: verdict.to_string(),
+            robot_id: robot.to_string(),
+            trajectory_sha256: sha.clone(),
+            issued_at_ms: now_ms() - 100,
+            valid_until_ms: now_ms() + 60_000,
+            nonce: "0123456789abcdef0123456789abcdef".to_string(),
+            key_id: hex(&twin_key().verifying_key().to_bytes()[..8]),
+            signature: String::new(),
+        };
+        v.signature = hex(&twin_key()
+            .sign(crate::twin_pass::signed_text(&v, &sha).as_bytes())
+            .to_bytes());
+        format!(
+            r#"{{"verdict":{{"verdict":"{}","robot_id":"{}","trajectory_sha256":"{}","issued_at_ms":{},"valid_until_ms":{},"nonce":"{}","key_id":"{}","signature":"{}"}},"samples":{SAMPLES_JSON}}}"#,
+            v.verdict,
+            v.robot_id,
+            v.trajectory_sha256,
+            v.issued_at_ms,
+            v.valid_until_ms,
+            v.nonce,
+            v.key_id,
+            v.signature
+        )
+    }
+
+    fn real_body(position: f64, certificate: &str, twin_pass: Option<&str>) -> String {
+        let pass = twin_pass
+            .map(|p| format!(r#","twin_pass":{p}"#))
+            .unwrap_or_default();
+        format!(
+            r#"{{"mode":"real","joint":"shoulder","position":{position:?},"certificate":{certificate}{pass}}}"#
+        )
+    }
+
+    fn certificate_at(position: f64, nonce: &str) -> String {
+        certificate_json(
+            &twin_key(),
+            "shoulder",
+            position,
+            false,
+            2.0,
+            now_ms(),
+            nonce,
+        )
+    }
+
+    fn twin_pass_config(required: bool) -> ServerConfig {
+        ServerConfig {
+            twin_pass: TwinPassConfig {
+                required,
+                robot_id: "arm-1".to_string(),
+                ..TwinPassConfig::default()
+            },
+            ..certified_config()
+        }
+    }
+
+    #[test]
+    fn with_the_switch_off_a_real_command_does_not_need_a_verdict() {
+        let port = start_with(twin_pass_config(false));
+        let (status, resp) = post_with(
+            port,
+            "/route",
+            "",
+            &real_body(1.0, &certificate_at(1.0, NONCE_A), None),
+        );
+        assert_eq!(status, 200);
+        assert!(resp.contains("SentReal"), "{resp}");
+    }
+
+    #[test]
+    fn with_the_switch_on_a_real_command_without_a_verdict_is_blocked_and_keeps_its_certificate() {
+        let port = start_with(twin_pass_config(true));
+        let certificate = certificate_at(1.0, NONCE_A);
+        let (_, blocked) = post_with(port, "/route", "", &real_body(1.0, &certificate, None));
+        assert!(blocked.contains("BlockedByInterlock"), "{blocked}");
+        assert!(blocked.contains("twin_pass"), "{blocked}");
+        // the certificate was not used up by the refusal: with the verdict the same command goes
+        let (_, sent) = post_with(
+            port,
+            "/route",
+            "",
+            &real_body(1.0, &certificate, Some(&twin_pass_json("pass", "arm-1"))),
+        );
+        assert!(sent.contains("SentReal"), "{sent}");
+        let (_, stats) = get_with(port, "/stats", "");
+        assert!(stats.contains("\"requireTwinPass\":true"), "{stats}");
+        assert!(stats.contains("\"blockedByTwinPass\":1"), "{stats}");
+    }
+
+    #[test]
+    fn with_the_switch_on_only_a_pass_for_this_robot_and_this_command_goes() {
+        let port = start_with(twin_pass_config(true));
+        for (position, nonce, pass) in [
+            (1.0, NONCE_A, twin_pass_json("fail", "arm-1")),
+            (1.0, NONCE_B, twin_pass_json("incomplete", "arm-1")),
+            (
+                1.0,
+                "cccccccccccccccccccccccccccccccc",
+                twin_pass_json("pass", "arm-2"),
+            ),
+            // a position that is not a point of the passed trajectory
+            (
+                1.25,
+                "dddddddddddddddddddddddddddddddd",
+                twin_pass_json("pass", "arm-1"),
+            ),
+        ] {
+            let (_, resp) = post_with(
+                port,
+                "/route",
+                "",
+                &real_body(position, &certificate_at(position, nonce), Some(&pass)),
+            );
+            assert!(resp.contains("BlockedByInterlock"), "{position} {resp}");
+        }
+    }
+
+    #[test]
+    fn a_point_of_the_trajectory_is_sent_once_and_the_other_points_still_go() {
+        let port = start_with(twin_pass_config(true));
+        let pass = twin_pass_json("pass", "arm-1");
+        let (_, first) = post_with(
+            port,
+            "/route",
+            "",
+            &real_body(1.0, &certificate_at(1.0, NONCE_A), Some(&pass)),
+        );
+        assert!(first.contains("SentReal"), "{first}");
+        let (_, again) = post_with(
+            port,
+            "/route",
+            "",
+            &real_body(1.0, &certificate_at(1.0, NONCE_B), Some(&pass)),
+        );
+        assert!(
+            again.contains("BlockedByInterlock") && again.contains("already sent"),
+            "{again}"
+        );
+        let (_, next) = post_with(
+            port,
+            "/route",
+            "",
+            &real_body(
+                1.5,
+                &certificate_at(1.5, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"),
+                Some(&pass),
+            ),
+        );
+        assert!(next.contains("SentReal"), "{next}");
+    }
+
+    #[test]
+    fn the_simulation_mode_never_needs_a_verdict() {
+        let port = start_with(twin_pass_config(true));
+        let (status, resp) = post_with(port, "/route", "", &route_body("simulation", None));
+        assert_eq!(status, 200);
+        assert!(resp.contains("SentSimulation"), "{resp}");
+    }
+
+    fn admin_headers(key: &[u8], role: &str) -> String {
+        format!("Authorization: Bearer {}\r\n", server_token(key, role))
+    }
+
+    fn settings_config(
+        key: &[u8],
+        locked: bool,
+        robot_id: &str,
+        file: Option<std::path::PathBuf>,
+    ) -> ServerConfig {
+        ServerConfig {
+            identity_key: Some(key.to_vec()),
+            twin_pass: TwinPassConfig {
+                required: locked,
+                locked,
+                robot_id: robot_id.to_string(),
+                file,
+            },
+            ..certified_config()
+        }
+    }
+
+    const SETTINGS_KEY: &[u8] = b"0123456789abcdef0123456789abcdef";
+
+    #[test]
+    fn the_switch_is_read_by_any_identity_and_changed_only_by_an_administrator_with_a_confirmation()
+    {
+        let port = start_with(settings_config(SETTINGS_KEY, false, "arm-1", None));
+        let (status, view) = get_with(
+            port,
+            "/settings/twin-pass",
+            &admin_headers(SETTINGS_KEY, "viewer"),
+        );
+        assert_eq!(status, 200);
+        assert!(
+            view.contains("\"requireTwinPass\":false") && view.contains("\"ready\":true"),
+            "{view}"
+        );
+        // an operator may command the robot but not change this switch
+        let (status, _) = post_with(
+            port,
+            "/settings/twin-pass",
+            &admin_headers(SETTINGS_KEY, "operator"),
+            r#"{"requireTwinPass":true,"confirm":true}"#,
+        );
+        assert_eq!(status, 403);
+        let admin = admin_headers(SETTINGS_KEY, "admin");
+        let (status, body) = post_with(
+            port,
+            "/settings/twin-pass",
+            &admin,
+            r#"{"requireTwinPass":true}"#,
+        );
+        assert_eq!(status, 400);
+        assert!(body.contains("CONFIRMATION_REQUIRED"), "{body}");
+        for bad in [
+            r#"{}"#,
+            r#"{"requireTwinPass":"yes","confirm":true}"#,
+            r#"{"requireTwinPass":true,"confirm":true,"x":1}"#,
+        ] {
+            assert_eq!(
+                post_with(port, "/settings/twin-pass", &admin, bad).0,
+                400,
+                "{bad}"
+            );
+        }
+        let (status, body) = post_with(
+            port,
+            "/settings/twin-pass",
+            &admin,
+            r#"{"requireTwinPass":true,"confirm":true}"#,
+        );
+        assert_eq!(status, 200);
+        assert!(
+            body.contains("\"requireTwinPass\":true") && body.contains("\"changed\":true"),
+            "{body}"
+        );
+        // from now on a real command needs the verdict
+        let (_, resp) = post_with(
+            port,
+            "/route",
+            &admin,
+            &real_body(1.0, &certificate_at(1.0, NONCE_A), None),
+        );
+        assert!(resp.contains("BlockedByInterlock"), "{resp}");
+        // and it can be turned off again
+        let (status, body) = post_with(
+            port,
+            "/settings/twin-pass",
+            &admin,
+            r#"{"requireTwinPass":false,"confirm":true}"#,
+        );
+        assert_eq!(status, 200);
+        assert!(body.contains("\"requireTwinPass\":false"), "{body}");
+    }
+
+    #[test]
+    fn without_the_identity_of_the_server_nobody_can_change_the_switch() {
+        let port = start_with(twin_pass_config(false));
+        let (status, _) = post_with(
+            port,
+            "/settings/twin-pass",
+            "",
+            r#"{"requireTwinPass":true,"confirm":true}"#,
+        );
+        assert_eq!(status, 403);
+        let (status, view) = get_with(port, "/settings/twin-pass", "");
+        assert_eq!(status, 200);
+        assert!(view.contains("\"canChange\":false"), "{view}");
+    }
+
+    #[test]
+    fn a_locked_switch_stays_on_and_a_switch_without_its_key_or_robot_cannot_be_turned_on() {
+        let locked = start_with(settings_config(SETTINGS_KEY, true, "arm-1", None));
+        let admin = admin_headers(SETTINGS_KEY, "admin");
+        let (status, body) = post_with(
+            locked,
+            "/settings/twin-pass",
+            &admin,
+            r#"{"requireTwinPass":false,"confirm":true}"#,
+        );
+        assert_eq!(status, 409);
+        assert!(body.contains("SETTING_REFUSED"), "{body}");
+        let no_robot = start_with(settings_config(SETTINGS_KEY, false, "", None));
+        let (status, _) = post_with(
+            no_robot,
+            "/settings/twin-pass",
+            &admin,
+            r#"{"requireTwinPass":true,"confirm":true}"#,
+        );
+        assert_eq!(status, 409);
+    }
+
+    #[test]
+    fn a_change_is_kept_in_the_file_and_a_file_that_cannot_be_written_changes_nothing() {
+        let dir = std::env::temp_dir().join(format!("hil-twin-pass-{}", now_ms()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("twin_pass.json");
+        let port = start_with(settings_config(
+            SETTINGS_KEY,
+            false,
+            "arm-1",
+            Some(file.clone()),
+        ));
+        let admin = admin_headers(SETTINGS_KEY, "admin");
+        let (status, _) = post_with(
+            port,
+            "/settings/twin-pass",
+            &admin,
+            r#"{"requireTwinPass":true,"confirm":true}"#,
+        );
+        assert_eq!(status, 200);
+        assert!(std::fs::read_to_string(&file).unwrap().contains("true"));
+        let missing = dir.join("no-such-folder").join("twin_pass.json");
+        let port = start_with(settings_config(SETTINGS_KEY, false, "arm-1", Some(missing)));
+        let (status, _) = post_with(
+            port,
+            "/settings/twin-pass",
+            &admin,
+            r#"{"requireTwinPass":true,"confirm":true}"#,
+        );
+        assert_eq!(status, 409);
+        let (_, view) = get_with(port, "/settings/twin-pass", &admin);
+        assert!(view.contains("\"requireTwinPass\":false"), "{view}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
