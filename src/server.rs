@@ -3858,7 +3858,7 @@ Content-Length: 500
         )
     }
 
-    fn real_body(position: f64, certificate: &str, twin_pass: Option<&str>) -> String {
+    fn pass_body(position: f64, certificate: &str, twin_pass: Option<&str>) -> String {
         let pass = twin_pass
             .map(|p| format!(r#","twin_pass":{p}"#))
             .unwrap_or_default();
@@ -3897,7 +3897,7 @@ Content-Length: 500
             port,
             "/route",
             "",
-            &real_body(1.0, &certificate_at(1.0, NONCE_A), None),
+            &pass_body(1.0, &certificate_at(1.0, NONCE_A), None),
         );
         assert_eq!(status, 200);
         assert!(resp.contains("SentReal"), "{resp}");
@@ -3907,7 +3907,7 @@ Content-Length: 500
     fn with_the_switch_on_a_real_command_without_a_verdict_is_blocked_and_keeps_its_certificate() {
         let port = start_with(twin_pass_config(true));
         let certificate = certificate_at(1.0, NONCE_A);
-        let (_, blocked) = post_with(port, "/route", "", &real_body(1.0, &certificate, None));
+        let (_, blocked) = post_with(port, "/route", "", &pass_body(1.0, &certificate, None));
         assert!(blocked.contains("BlockedByInterlock"), "{blocked}");
         assert!(blocked.contains("twin_pass"), "{blocked}");
         // the certificate was not used up by the refusal: with the verdict the same command goes
@@ -3915,7 +3915,7 @@ Content-Length: 500
             port,
             "/route",
             "",
-            &real_body(1.0, &certificate, Some(&twin_pass_json("pass", "arm-1"))),
+            &pass_body(1.0, &certificate, Some(&twin_pass_json("pass", "arm-1"))),
         );
         assert!(sent.contains("SentReal"), "{sent}");
         let (_, stats) = get_with(port, "/stats", "");
@@ -3945,7 +3945,7 @@ Content-Length: 500
                 port,
                 "/route",
                 "",
-                &real_body(position, &certificate_at(position, nonce), Some(&pass)),
+                &pass_body(position, &certificate_at(position, nonce), Some(&pass)),
             );
             assert!(resp.contains("BlockedByInterlock"), "{position} {resp}");
         }
@@ -3959,14 +3959,14 @@ Content-Length: 500
             port,
             "/route",
             "",
-            &real_body(1.0, &certificate_at(1.0, NONCE_A), Some(&pass)),
+            &pass_body(1.0, &certificate_at(1.0, NONCE_A), Some(&pass)),
         );
         assert!(first.contains("SentReal"), "{first}");
         let (_, again) = post_with(
             port,
             "/route",
             "",
-            &real_body(1.0, &certificate_at(1.0, NONCE_B), Some(&pass)),
+            &pass_body(1.0, &certificate_at(1.0, NONCE_B), Some(&pass)),
         );
         assert!(
             again.contains("BlockedByInterlock") && again.contains("already sent"),
@@ -3976,7 +3976,7 @@ Content-Length: 500
             port,
             "/route",
             "",
-            &real_body(
+            &pass_body(
                 1.5,
                 &certificate_at(1.5, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"),
                 Some(&pass),
@@ -4075,7 +4075,7 @@ Content-Length: 500
             port,
             "/route",
             &admin,
-            &real_body(1.0, &certificate_at(1.0, NONCE_A), None),
+            &pass_body(1.0, &certificate_at(1.0, NONCE_A), None),
         );
         assert!(resp.contains("BlockedByInterlock"), "{resp}");
         // and it can be turned off again
