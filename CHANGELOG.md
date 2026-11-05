@@ -4,6 +4,8 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [0.1.5] - The pass verdict of the twin can be required before the real robot moves (requiretwinpass, off by default): with the switch on, a real command is forwarded only if its request carries the verdict signed by the twin for its... (and 3 more changes)
+
 - **The pass verdict of the twin can be required before the real robot moves (`require_twin_pass`, off by default):** with the switch on, a real command is forwarded only if its request carries the verdict signed by the twin for its trajectory and the samples it was made for. The bridge recomputes the SHA-256 of the samples, checks the Ed25519 signature, the robot (`--twin-robot-id`), the window and that the command is a point of the trajectory not sent yet (each point is good for one command; `fail` and `incomplete` allow nothing). `--require-twin-pass` turns it on and locks it; an administrator of the server changes it otherwise with `POST /settings/twin-pass` (a confirmation is needed), and `--twin-pass-file` keeps it. `GET /stats` adds `requireTwinPass` and `blockedByTwinPass`.
 
 - **The build test of the repository compiles only on CI or when allowed:** for the stacks that compile (`rust`, `go`, `android`, `flutter`, `firmware-c`), `tools/build_test.py` prints `BUILD_TEST=SKIPPED` with exit status 2 on a plain PC, never a pass; `ALLOW_LOCAL_BUILD=1` allows it and a CI runner always may. The `python` and `node` stacks are not locked.
