@@ -4,6 +4,8 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+- **A visible simulation bench:** the workflow "Simulation bench" runs the tests with the Rust 1.85.1 toolchain and routes commands through the simulated transport and the interlock, checking the exit codes of the command line, on every push, by hand and once a week; `docs/SIMULATION.md` says what it exercises and what it cannot show.
+
 - **A position that is not a number never passes the joint limits:** `JointLimits::check` refuses NaN and infinite positions for every kind of joint, not only the bounded ones (a NaN is neither below the lower limit nor above the upper one, so it passed every comparison). The command protocol already refused such a position; this is the second line of defence. 3 tests, plus 4 on the edges of the validity window of the watchdog.
 
 ## [0.1.5] - The pass verdict of the twin can be required before the real robot moves (requiretwinpass, off by default): with the switch on, a real command is forwarded only if its request carries the verdict signed by the twin for its... (and 3 more changes)

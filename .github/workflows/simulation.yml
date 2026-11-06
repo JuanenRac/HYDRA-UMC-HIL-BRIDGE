@@ -1,0 +1,59 @@
+# =============================================================================
+# HYDRA-UMC-HIL-BRIDGE - Simulation bench
+# Copyright (C) 2026 JuanenRac (Electro Hobby 3D) <electrohobby3d@gmail.com>
+# GPL-3.0-or-later - see LICENSE
+#
+# Runs the bridge against its simulated transport and simulated twin reports only (no controller, no robot, no twin service). See docs/SIMULATION.md.
+# It runs on every push and pull request, by hand, and once a week, with the Rust 1.85.1 toolchain of Debian trixie.
+# =============================================================================
+name: Simulation bench
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "41 5 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  simulation:
+    name: Run the simulated transport and interlock
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Rust 1.85.1
+        uses: dtolnay/rust-toolchain@ccc8c1f930153b792217f06c65a38f23a882993a # 1.85.1
+        with:
+          toolchain: 1.85.1
+      - name: Run the tests of the bridge with the locked dependency versions
+        run: cargo test --locked --all-targets
+      - name: Build the command line with the locked dependency versions
+        run: cargo build --locked
+      - name: Route commands through the simulated transport and the interlock
+        shell: bash
+        run: |
+          bridge=target/debug/hydra-umc-hil-bridge
+          expect() {
+            want="$1"; shift
+            set +e
+            out="$("$bridge" "$@")"
+            got=$?
+            set -e
+            echo "$ $* -> exit $got: $out"
+            test "$got" -eq "$want"
+          }
+          expect 0 route --mode simulation --joint j1 --position 0.5
+          expect 0 route --mode real --joint j1 --position 0.5 --clear-distance 2.0
+          expect 1 route --mode real --joint j1 --position 0.5
+          expect 1 route --mode real --joint j1 --position 0.5 --collision-risk --distance 0.02
+          expect 3 route --mode real --joint j1 --position 0.5 --transport-disconnected
+          expect 3 route --mode real --joint j1 --position 0.5 --transport-latency-ms 500 --transport-timeout-ms 100
+          expect 2 route --joint j1 --position 0.5
+          echo "SIMULATION_ROUTES=OK"
