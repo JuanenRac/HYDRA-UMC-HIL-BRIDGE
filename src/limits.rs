@@ -105,6 +105,12 @@ impl JointLimits {
 
     /// Whether a real command for this joint at this position may be forwarded. The error says why not.
     pub fn check(&self, joint: &str, position: f64) -> Result<(), String> {
+        // a NaN is neither below the lower limit nor above the upper one, so without this it would pass every comparison below
+        if !position.is_finite() {
+            return Err(format!(
+                "position {position} of joint {joint:?} is not a finite number"
+            ));
+        }
         match self.joints.get(joint) {
             None => Err(format!("the URDF has no joint {joint:?}")),
             Some(JointRange::Fixed) => Err(format!(
@@ -213,5 +219,45 @@ mod tests {
             let error = JointLimits::from_urdf(xml).unwrap_err();
             assert!(error.contains(expected), "{xml}: {error}");
         }
+    }
+
+    #[test]
+    fn a_position_that_is_not_a_finite_number_is_refused_for_every_kind_of_joint() {
+        let limits = JointLimits::from_urdf(URDF).unwrap();
+        for position in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for joint in ["shoulder", "wrist", "mount", "elbow"] {
+                assert!(limits.check(joint, position).is_err(), "{joint} {position}");
+            }
+        }
+        let reason = limits.check("shoulder", f64::NAN).unwrap_err();
+        assert!(reason.contains("not a finite number"), "{reason}");
+    }
+
+    #[test]
+    fn the_joints_are_read_whatever_their_order_and_the_limits_of_a_negative_range_hold() {
+        let urdf = r#"<robot name="r"><joint name="z" type="prismatic"><parent link="a"/><child link="b"/>
+            <limit lower="-0.30" upper="-0.10" effort="1" velocity="1"/></joint>
+            <joint name="a" type="continuous"><parent link="b"/><child link="c"/></joint></robot>"#;
+        let limits = JointLimits::from_urdf(urdf).unwrap();
+        assert_eq!(limits.len(), 2);
+        assert!(limits.check("z", -0.2).is_ok());
+        assert!(limits.check("z", -0.31).is_err());
+        assert!(limits.check("z", 0.0).is_err());
+        assert!(limits.check("a", -1.0e9).is_ok());
+    }
+
+    #[test]
+    fn a_joint_without_a_name_or_with_a_blank_one_is_an_error() {
+        for xml in [
+            r#"<robot><joint type="fixed"/></robot>"#,
+            r#"<robot><joint name="  " type="fixed"/></robot>"#,
+        ] {
+            assert!(
+                JointLimits::from_urdf(xml).unwrap_err().contains("no name"),
+                "{xml}"
+            );
+        }
+        // a joint with no type is not a joint this bridge commands
+        assert!(JointLimits::from_urdf(r#"<robot><joint name="a"/></robot>"#).is_err());
     }
 }

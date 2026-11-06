@@ -264,4 +264,77 @@ mod tests {
         );
         assert_eq!(l.due_stops(1500)[0].joint, "b");
     }
+
+    #[test]
+    fn the_edges_of_the_window_are_exact() {
+        let l = leases(true);
+        let max = DEFAULT_MAX_VALID_FOR_MS;
+        let skew = DEFAULT_FUTURE_SKEW_MS;
+        // the longest lease allowed passes, one millisecond more does not
+        assert!(l.check("j", Some(&window(1000, max, None)), 1000).is_ok());
+        assert!(l
+            .check("j", Some(&window(1000, max + 1, None)), 1000)
+            .is_err());
+        // issued exactly as far in the future as the skew allows passes, one millisecond more does not
+        assert!(l
+            .check("j", Some(&window(1000 + skew, 100, None)), 1000)
+            .is_ok());
+        assert!(l
+            .check("j", Some(&window(1001 + skew, 100, None)), 1000)
+            .is_err());
+        // a window that ends exactly now is already expired; one millisecond left is not
+        assert!(l.check("j", Some(&window(900, 100, None)), 1000).is_err());
+        assert!(l.check("j", Some(&window(901, 100, None)), 1000).is_ok());
+    }
+
+    #[test]
+    fn the_longest_lease_and_the_skew_are_the_ones_configured() {
+        let l = Leases::new(WatchdogConfig {
+            require_validity: true,
+            max_valid_for_ms: 50,
+            future_skew_ms: 10,
+        });
+        assert!(l.check("j", Some(&window(1000, 50, None)), 1000).is_ok());
+        assert!(l.check("j", Some(&window(1000, 51, None)), 1000).is_err());
+        assert!(l.check("j", Some(&window(1010, 20, None)), 1000).is_ok());
+        assert!(l.check("j", Some(&window(1011, 20, None)), 1000).is_err());
+        let reason = l
+            .check("j", Some(&window(1000, 51, None)), 1000)
+            .unwrap_err();
+        assert!(reason.contains("51") && reason.contains("50"), "{reason}");
+    }
+
+    #[test]
+    fn checking_records_nothing_and_a_command_without_a_sequence_keeps_the_last_one() {
+        let mut l = leases(true);
+        // check never starts a lease
+        assert!(l
+            .check("j", Some(&window(1000, 200, Some(5))), 1000)
+            .is_ok());
+        assert_eq!(l.active(1000), 0);
+        assert!(l.due_stops(5000).is_empty());
+        // a granted command with a sequence, then one without: the number of the first still guards the joint
+        l.grant("j", 0.1, &window(1000, 200, Some(5)));
+        l.grant("j", 0.2, &window(1100, 200, None));
+        assert!(l
+            .check("j", Some(&window(1150, 200, Some(5))), 1150)
+            .is_err());
+        assert!(l
+            .check("j", Some(&window(1150, 200, Some(6))), 1150)
+            .is_ok());
+    }
+
+    #[test]
+    fn several_joints_that_run_out_together_are_stopped_in_name_order_and_each_once() {
+        let mut l = leases(true);
+        for (joint, position) in [("c", 3.0), ("a", 1.0), ("b", 2.0)] {
+            l.grant(joint, position, &window(1000, 100, None));
+        }
+        let stops = l.due_stops(1100);
+        let names: Vec<&str> = stops.iter().map(|s| s.joint.as_str()).collect();
+        assert_eq!(names, ["a", "b", "c"]);
+        assert_eq!(stops[2].last_position, 3.0);
+        assert!(l.due_stops(1100).is_empty());
+        assert_eq!(l.active(1050), 0, "a stopped joint holds no lease");
+    }
 }
