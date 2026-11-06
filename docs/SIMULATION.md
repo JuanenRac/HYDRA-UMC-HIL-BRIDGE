@@ -10,7 +10,7 @@ and the failure paths; it says nothing about a real controller, a real network o
 ```
 cargo test --locked --all-targets
 cargo build --locked
-target/debug/hydra-umc-hil-bridge route --mode real --joint j1 --position 0.5 --transport-latency-ms 500 --transport-timeout-ms 100
+target/debug/hydra-umc-hil-bridge route --mode real --joint j1 --position 0.5 --clear-distance 2.0 --transport-latency-ms 500 --transport-timeout-ms 100
 ```
 
 The workflow named "Simulation bench" does this on a clean Linux runner with the Rust 1.85.1 toolchain on every push and pull request, by hand and once a week.
@@ -25,7 +25,7 @@ Cargo runs only there (or in the build queue of the maintainer), never as a heav
 | `route --mode real --clear-distance 2.0` | the interlock allows a command when the twin report says the path is clear (exit 0) |
 | `route --mode real` without a report | blocked: not being told about a risk is not the same as there being none (exit 1) |
 | `route --mode real --collision-risk --distance 0.02` | blocked on an imminent collision (exit 1) |
-| `route ... --transport-disconnected`, `--transport-latency-ms` over `--transport-timeout-ms` | the command is allowed but never reported as delivered (exit 3) |
+| `route --mode real --clear-distance 2.0` with `--transport-disconnected`, or `--transport-latency-ms` over `--transport-timeout-ms` | the interlock allows the command but never reported as delivered (exit 3) |
 | `route` without `--mode` | refused (exit 2) |
 
 The exit codes are checked by the workflow, so the documented behaviour of the command line (`docs/CLI_REFERENCE.md`) cannot drift from the code.

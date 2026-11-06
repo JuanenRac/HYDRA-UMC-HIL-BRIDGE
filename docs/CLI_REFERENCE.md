@@ -82,7 +82,7 @@ command, but the transport itself has no live connection; never reported as
 delivered (exit `3`):
 
 ```
-$ hydra-umc-hil-bridge route --mode real --joint j1 --position 0.5 --transport-disconnected
+$ hydra-umc-hil-bridge route --mode real --joint j1 --position 0.5 --clear-distance 2.0 --transport-disconnected
 TRANSPORT FAILURE: command was not confirmed delivered (transport is disconnected)
 ```
 
@@ -90,7 +90,7 @@ TRANSPORT FAILURE: command was not confirmed delivered (transport is disconnecte
 budget (exit `3`):
 
 ```
-$ hydra-umc-hil-bridge route --mode real --joint j1 --position 0.5 --transport-latency-ms 500 --transport-timeout-ms 100
+$ hydra-umc-hil-bridge route --mode real --joint j1 --position 0.5 --clear-distance 2.0 --transport-latency-ms 500 --transport-timeout-ms 100
 TRANSPORT FAILURE: command was not confirmed delivered (transport timed out after 100ms)
 ```
 

@@ -53,7 +53,7 @@ jobs:
           expect 0 route --mode real --joint j1 --position 0.5 --clear-distance 2.0
           expect 1 route --mode real --joint j1 --position 0.5
           expect 1 route --mode real --joint j1 --position 0.5 --collision-risk --distance 0.02
-          expect 3 route --mode real --joint j1 --position 0.5 --transport-disconnected
-          expect 3 route --mode real --joint j1 --position 0.5 --transport-latency-ms 500 --transport-timeout-ms 100
+          expect 3 route --mode real --joint j1 --position 0.5 --clear-distance 2.0 --transport-disconnected
+          expect 3 route --mode real --joint j1 --position 0.5 --clear-distance 2.0 --transport-latency-ms 500 --transport-timeout-ms 100
           expect 2 route --joint j1 --position 0.5
           echo "SIMULATION_ROUTES=OK"
