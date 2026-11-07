@@ -213,6 +213,14 @@ on the CM5 (see the systemd unit's own `RestrictAddressFamilies`/
 
 `serve --identity-key-file FILE` (or `HYDRA_UMC_HIL_BRIDGE_IDENTITY_KEY_FILE`; off by default) accepts the signed token of HYDRA-UMC-SERVER next to the token of the service: a viewer may read but not change, and a request with no credential is refused even on loopback, `GET /health` and `GET /stats` included.
 
+## compare-dynamics
+
+```
+compare-dynamics --simulator PATH --urdf ROBOT.urdf --recording FILE [--joints "..."] [--velocities "..."] [--torques "..."] [--duration S] [--dt S] [--max-deviation RAD]
+```
+
+Runs `simulate --json` of HYDRA-UMC-PHYSICS-REPLICA (the program at `--simulator`, with fixed arguments and no shell) and compares its joint positions with a recording of a real arm, by straight lines between the simulated samples. The recording is `{"joints": [...], "samples": [{"t_s": 0.0, "positions": [...]}]}` with the joints in any order. It prints `{"within_limit": ..., "joints": [{"joint", "max_abs", "rms", "compared"}]}`; exit `0` within `--max-deviation` (or when none is given), `1` over it, `2` for bad input. Samples outside the simulated time are not compared. Evidence: simulator until a real arm has been recorded.
+
 ## Exit codes
 
 | Code | Meaning |

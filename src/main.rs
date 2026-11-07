@@ -23,6 +23,7 @@ mod audit;
 mod bridge;
 mod certificate;
 mod collision_shadow;
+mod dynamics_link;
 #[allow(dead_code)] // only the HMAC of the signed token is used
 mod hmac;
 mod http_client;
@@ -815,6 +816,87 @@ fn run_serve(args: &[String]) -> ExitCode {
     }
 }
 
+/// Sets the rigid-body simulation of HYDRA-UMC-PHYSICS-REPLICA against joint positions recorded from a real arm (`compare-dynamics`): exit 0 when every joint stays
+/// within `--max-deviation` (when given), 1 when one does not, 2 for bad input. The numbers are those of a model until a real arm has been compared.
+fn run_compare_dynamics(args: &[String]) -> ExitCode {
+    let (Some(simulator), Some(urdf), Some(recording)) = (
+        find_flag(args, "--simulator"),
+        find_flag(args, "--urdf"),
+        find_flag(args, "--recording"),
+    ) else {
+        eprintln!(
+            "compare-dynamics: --simulator PATH, --urdf PATH and --recording FILE are required"
+        );
+        return ExitCode::from(2);
+    };
+    let mut extra = Vec::new();
+    for flag in [
+        "--joints",
+        "--velocities",
+        "--torques",
+        "--duration",
+        "--dt",
+    ] {
+        if let Some(value) = find_flag(args, flag) {
+            extra.push(flag.to_string());
+            extra.push(value);
+        }
+    }
+    let limit = match find_flag(args, "--max-deviation") {
+        None => None,
+        Some(text) => match text.trim().parse::<f64>() {
+            Ok(v) if v.is_finite() && v >= 0.0 => Some(v),
+            _ => {
+                eprintln!("compare-dynamics: --max-deviation wants a finite number, zero or more");
+                return ExitCode::from(2);
+            }
+        },
+    };
+    let simulated = match dynamics_link::run_simulator(&simulator, &urdf, &extra) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("compare-dynamics: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let text = match std::fs::read_to_string(&recording) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("compare-dynamics: the recording cannot be read: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let recorded = match dynamics_link::parse_recording(&text, &simulated.joints) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("compare-dynamics: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let result = match dynamics_link::deviations(&simulated, &recorded) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("compare-dynamics: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    eprintln!("note: the simulation is a model (inertial blocks and gravity, no friction, no motor dynamics); evidence = simulator");
+    let within = limit.is_none_or(|l| result.iter().all(|j| j.max_abs <= l));
+    let rows: Vec<serde_json::Value> = result
+        .iter()
+        .map(|j| serde_json::json!({"joint": j.joint, "max_abs": j.max_abs, "rms": j.rms, "compared": j.compared}))
+        .collect();
+    println!(
+        "{}",
+        serde_json::json!({"within_limit": within, "joints": rows})
+    );
+    if within {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
 
@@ -822,6 +904,7 @@ fn main() -> ExitCode {
         Some("route") => run_route(&args[1..]),
         Some("mirror") => run_mirror(&args[1..]),
         Some("serve") => run_serve(&args[1..]),
+        Some("compare-dynamics") => run_compare_dynamics(&args[1..]),
         _ => {
             println!("{PROJECT_NAME} v{VERSION}");
             println!("{ROLE}");

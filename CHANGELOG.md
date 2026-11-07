@@ -4,6 +4,8 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+- **A `compare-dynamics` command sets the rigid-body simulation against a real arm:** `compare-dynamics --simulator PATH --urdf ROBOT.urdf --recording FILE [--joints ...] [--velocities ...] [--torques ...] [--duration S] [--dt S] [--max-deviation RAD]` runs the `simulate` command of the physics replica (a local program, fixed arguments, no shell), reads a recording of joint positions (`{"joints": [...], "samples": [{"t_s": ..., "positions": [...]}]}`) and prints the largest and the root-mean-square deviation of each joint, with exit 1 when one is over the limit. The simulation is a model, so the result is evidence = simulator until a real arm has been recorded.
+
 ## [0.1.6] - A visible simulation bench: the workflow "Simulation bench" runs the tests with the Rust 1.85.1 toolchain and routes commands through the simulated transport and the interlock, checking the exit codes of the command line, on... (and 1 more changes)
 
 - **A visible simulation bench:** the workflow "Simulation bench" runs the tests with the Rust 1.85.1 toolchain and routes commands through the simulated transport and the interlock, checking the exit codes of the command line, on every push, by hand and once a week; `docs/SIMULATION.md` says what it exercises and what it cannot show.
