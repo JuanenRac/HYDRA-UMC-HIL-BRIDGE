@@ -192,8 +192,10 @@ HTTP `200` when the request itself was well-formed; `400` on malformed
 JSON, on a body that is not valid UTF-8, on an empty or over-long `joint`, on
 a `position` that is not a finite number, or on a `transport` field without
 `--fault-injection`; `413` when the body is larger than 16 KB (it is not read
-further). The bridge does not know the joint list, limits or units yet: it
-only checks the shape of the values.
+further). With `--urdf FILE` the bridge knows the joints and their ranges: a real
+command for an unknown joint or a position outside its range is refused (counted as
+`outsideLimits`); positions are in the units of the URDF (radians, metres). Without
+`--urdf` it only checks the shape of the values.
 
 **`POST /mirror`** — `{"joint": "elbow", "position": -0.3}`, responds
 `{"mirrored": true}` or `{"mirrored": false, "error": "..."}`, both `200`;

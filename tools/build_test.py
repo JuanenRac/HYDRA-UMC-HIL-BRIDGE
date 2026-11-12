@@ -91,7 +91,7 @@ def main() -> int:
         run(npm, "test", "--if-present")
         run(npm, "run", "lint", "--if-present")
     elif stack == "rust":
-        run("cargo", "build", "--all-targets")
+        run("cargo", "test", "--all-targets")
     elif stack == "go":
         module_root = ROOT / "src" if (ROOT / "src" / "go.mod").is_file() else ROOT
         run("go", "build", "./...", cwd=module_root)
