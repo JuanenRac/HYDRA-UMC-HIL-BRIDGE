@@ -29,6 +29,8 @@ mod hmac;
 mod http_client;
 mod interlock;
 mod limits;
+#[cfg(test)]
+mod loader_tests;
 mod metrics;
 mod protocol;
 mod safety_zones;

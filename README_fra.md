@@ -18,7 +18,7 @@ GPL-3.0-or-later - see LICENSE
   <img src="https://img.shields.io/badge/License-GPL%203.0--or--later-blue.svg" alt="GPL 3.0 or later">
   <img src="https://img.shields.io/badge/Rust-2021-DEA584.svg" alt="Rust">
   <img src="https://img.shields.io/badge/Safety-Interlock-gated-red.svg" alt="Safety">
-  <img src="https://img.shields.io/badge/Tests-217%20passing-2ea44f.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-241%20passing-2ea44f.svg" alt="Tests">
   <img src="https://img.shields.io/badge/Version-0.1.6-0f6cbd.svg" alt="Version">
   <img src="https://img.shields.io/badge/Maturity-functional-0F6CBD.svg" alt="Maturity">
 </p>
@@ -35,7 +35,7 @@ GPL-3.0-or-later - see LICENSE
 |---|---|
 | Version | `0.1.6` |
 | Maturité | Fonctionnel |
-| Tests | 217 (`cargo test`) |
+| Tests | 241 (`cargo test`) |
 | Technologie | Rust / hardware-in-the-loop I/O |
 | Cible | Le Raspberry Pi CM5 d'une cellule HYDRA-UMC |
 | Sur matériel réel | Simulé seulement : testé avec des émulateurs, des doubles de test ou des simulateurs ; aucune exécution sur du matériel réel n'est consignée pour cette version |
@@ -51,7 +51,7 @@ Chaque ligne est une partie de ce dépôt et le feu dit où elle en est aujourd'
 | Domaine | État | Ce que cela veut dire ici |
 |---|---|---|
 | Logiciel | 🟡 | Fonctionne pour son usage principal ; la vérification d'honnêteté ci-dessus liste ce qui manque encore |
-| Tests | 🟢 | 217 tests automatiques, exécutés à chaque modification |
+| Tests | 🟢 | 241 tests automatiques, exécutés à chaque modification |
 | Matériel réel | 🟠 | Simulé seulement : testé avec des émulateurs, des doubles de test ou des simulateurs ; aucune exécution sur du matériel réel n'est consignée pour cette version |
 | Intégration | 🟠 | Il fonctionne avec les autres services sur le banc d'essai CM5 et ses messages suivent les contrats partagés du SDK |
 | Sécurité | 🟠 | Quelques protections existent (un jeton, des limites sur ce qu'il accepte) mais elles ne sont pas toutes couvertes par des tests ; personne hors du projet ne les a relues |
@@ -179,7 +179,7 @@ cargo run --release -- serve --port 8113 --token-file token.txt   # real mode al
 
 ## 🧪 Tests
 
-217 tests Rust s'exécutent avec `cargo test` ; ils sont dans les modules de `src/`. Ils n'ont besoin ni de matériel ni de réseau.
+241 tests Rust s'exécutent avec `cargo test` ; ils sont dans les modules de `src/`. Ils n'ont besoin ni de matériel ni de réseau.
 
 La CI exécute `HYDRA_UMC_CI=1 python tools/ci_validate.py`, qui vérifie le manifeste, les documents, les huit README et les images.
 

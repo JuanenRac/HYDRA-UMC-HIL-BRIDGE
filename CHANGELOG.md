@@ -4,6 +4,8 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+- **Every loader of the `serve` command line is tested on its own:** a switch that is off asks for nothing else, an option without its switch is refused, a number outside its bounds is named with the bounds, a token shorter than 16 characters is refused, the key file of the twin must hold a valid key, a pass file that requires the verdict does not start without the key and the robot name, and a bad URDF is named. Line coverage of `main.rs` goes from 34 % to 58 % and that of the whole program from 91.1 % to 93.6 %.
+
 - **A `compare-dynamics` command sets the rigid-body simulation against a real arm:** `compare-dynamics --simulator PATH --urdf ROBOT.urdf --recording FILE [--joints ...] [--velocities ...] [--torques ...] [--duration S] [--dt S] [--max-deviation RAD]` runs the `simulate` command of the physics replica (a local program, fixed arguments, no shell), reads a recording of joint positions (`{"joints": [...], "samples": [{"t_s": ..., "positions": [...]}]}`) and prints the largest and the root-mean-square deviation of each joint, with exit 1 when one is over the limit. The simulation is a model, so the result is evidence = simulator until a real arm has been recorded.
 
 ## [0.1.6] - A visible simulation bench: the workflow "Simulation bench" runs the tests with the Rust 1.85.1 toolchain and routes commands through the simulated transport and the interlock, checking the exit codes of the command line, on... (and 1 more changes)

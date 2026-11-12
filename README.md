@@ -18,7 +18,7 @@ GPL-3.0-or-later - see LICENSE
   <img src="https://img.shields.io/badge/License-GPL%203.0--or--later-blue.svg" alt="GPL 3.0 or later">
   <img src="https://img.shields.io/badge/Rust-2021-DEA584.svg" alt="Rust">
   <img src="https://img.shields.io/badge/Safety-Interlock-gated-red.svg" alt="Safety">
-  <img src="https://img.shields.io/badge/Tests-217%20passing-2ea44f.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-241%20passing-2ea44f.svg" alt="Tests">
   <img src="https://img.shields.io/badge/Version-0.1.6-0f6cbd.svg" alt="Version">
   <img src="https://img.shields.io/badge/Maturity-functional-0F6CBD.svg" alt="Maturity">
 </p>
@@ -35,7 +35,7 @@ GPL-3.0-or-later - see LICENSE
 |---|---|
 | Version | `0.1.6` |
 | Maturity | Functional |
-| Tests | 217 (`cargo test`) |
+| Tests | 241 (`cargo test`) |
 | Stack | Rust / hardware-in-the-loop I/O |
 | Target | The Raspberry Pi CM5 of a HYDRA-UMC cell |
 | On real hardware | Simulated only: tested against emulators, fakes or simulators; no run on real hardware is recorded for this version |
@@ -51,7 +51,7 @@ Each line is one part of this repository and the light says how far it is today.
 | Area | State | What it means here |
 |---|---|---|
 | Software | 🟡 | Works for its main purpose; the honesty check above lists what is still missing |
-| Tests | 🟢 | 217 automated tests, run on every change |
+| Tests | 🟢 | 241 automated tests, run on every change |
 | Real hardware | 🟠 | Simulated only: tested against emulators, fakes or simulators; no run on real hardware is recorded for this version |
 | Integration | 🟠 | It runs together with the other services on the CM5 test bench and its messages follow the shared contracts of the SDK |
 | Security | 🟠 | Some protections exist (a token, limits on what it accepts) but they are not all covered by tests; nobody outside the project has reviewed them |
@@ -178,7 +178,7 @@ cargo run --release -- serve --port 8113 --token-file token.txt   # real mode al
 
 ## 🧪 Testing
 
-217 Rust tests run with `cargo test`; they sit inside the modules of `src/`. They need no hardware and no network.
+241 Rust tests run with `cargo test`; they sit inside the modules of `src/`. They need no hardware and no network.
 
 The CI runs `HYDRA_UMC_CI=1 python tools/ci_validate.py`, which checks the manifest, the documents, the eight READMEs and the pictures.
 
