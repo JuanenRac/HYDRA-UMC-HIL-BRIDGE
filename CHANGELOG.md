@@ -4,6 +4,7 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+- **README: the platform statement:** a note says that where the README speaks of the CM5 it means the pilot bench that runs today, and that the target platform of HYDRA-UMC, an NVIDIA Jetson Orin NX 16 GB, is a design that has not been built or tested.
 - **`build-test` runs the tests and the reference describes the joint limits:** the `build-test` script ran `cargo build --all-targets`, which compiled the tests without running them; it runs `cargo test --all-targets` now. `docs/CLI_REFERENCE.md` said the bridge did not know the joint list, limits or units; with `--urdf FILE` it does (a real command for an unknown joint or a position outside its range is refused and counted), and the text now says so, and that the positions are in the units of the URDF.
 
 - **Every loader of the `serve` command line is tested on its own:** a switch that is off asks for nothing else, an option without its switch is refused, a number outside its bounds is named with the bounds, a token shorter than 16 characters is refused, the key file of the twin must hold a valid key, a pass file that requires the verdict does not start without the key and the robot name, and a bad URDF is named. Line coverage of `main.rs` goes from 34 % to 58 % and that of the whole program from 91.1 % to 93.6 %.

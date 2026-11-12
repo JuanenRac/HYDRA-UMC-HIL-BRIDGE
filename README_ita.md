@@ -71,6 +71,8 @@ Consente agli sviluppatori di inviare comandi da qualsiasi interfaccia (App, Sui
 
 **HYDRA-UMC-HIL-BRIDGE** sta tra un'interfaccia di controllo e un robot che può essere reale o simulato. In modalità reale un comando muove un giunto solo quando il gemello digitale ha firmato per esso un certificato di interblocco recente; in simulazione il bridge rispecchia la posizione. Decide; i trasporti verso il controller reale e verso il gemello devono ancora arrivare.
 
+> **Piattaforma:** dove questo README dice CM5, intende il banco pilota che funziona oggi; la piattaforma di destinazione di HYDRA-UMC è un NVIDIA Jetson Orin NX da 16 GB, un progetto non costruito né provato.
+
 ## 🏛️ Architettura
 
 La suddivisione basata su modalità in `BRIDGE` e la porta dell'interblocco

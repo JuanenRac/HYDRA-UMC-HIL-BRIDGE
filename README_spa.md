@@ -71,6 +71,8 @@ Permite a los desarrolladores enviar comandos desde cualquier interfaz (App, Sui
 
 **HYDRA-UMC-HIL-BRIDGE** está entre una interfaz de control y un robot que puede ser real o simulado. En modo real una orden mueve una articulación solo cuando el gemelo digital ha firmado un certificado de enclavamiento reciente para ella; en modo simulación el bridge refleja la posición. Decide; los transportes al controlador real y al gemelo están por llegar.
 
+> **Plataforma:** donde este README dice CM5, se refiere al banco piloto que funciona hoy; la plataforma objetivo de HYDRA-UMC es una NVIDIA Jetson Orin NX de 16 GB, un diseño que no se ha construido ni probado.
+
 ## 🏛️ Arquitectura
 
 La división por modo en `BRIDGE` y la compuerta del enclavamiento de

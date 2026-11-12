@@ -71,6 +71,8 @@ Il permet aux développeurs d'envoyer des commandes depuis n'importe quelle inte
 
 **HYDRA-UMC-HIL-BRIDGE** se place entre une interface de commande et un robot qui peut être réel ou simulé. En mode réel, une commande ne déplace une articulation que si le jumeau numérique a signé pour elle un certificat de verrouillage récent ; en mode simulation, le bridge reflète la position. Il décide ; les transports vers le contrôleur réel et vers le jumeau restent à venir.
 
+> **Plateforme :** là où ce README dit CM5, il s'agit du banc pilote qui fonctionne aujourd'hui ; la plateforme visée par HYDRA-UMC est un NVIDIA Jetson Orin NX 16 Go, une conception ni construite ni testée.
+
 ## 🏛️ Architecture
 
 La répartition par mode au niveau de `BRIDGE` et la porte de verrouillage

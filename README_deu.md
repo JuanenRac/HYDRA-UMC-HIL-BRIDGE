@@ -71,6 +71,8 @@ Sie ermöglicht es Entwicklern, Befehle von jeder Schnittstelle (App, Suite, Stu
 
 **HYDRA-UMC-HIL-BRIDGE** sitzt zwischen einer Steuerungsoberfläche und einem Roboter, der echt oder simuliert sein kann. Im Realmodus bewegt ein Befehl ein Gelenk nur, wenn der digitale Zwilling dafür ein frisches Verriegelungszertifikat signiert hat; im Simulationsmodus spiegelt der Bridge stattdessen die Position. Er entscheidet; die Transporte zur echten Steuerung und zum Zwilling folgen noch.
 
+> **Plattform:** Wo dieses README CM5 sagt, ist der Pilotprüfstand gemeint, der heute läuft; die Zielplattform von HYDRA-UMC ist ein NVIDIA Jetson Orin NX 16 GB, ein Entwurf, der weder gebaut noch getestet wurde.
+
 ## 🏛️ Architektur
 
 Die modusbasierte Aufteilung bei `BRIDGE` und die Sicherheitsverriegelung

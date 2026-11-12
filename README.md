@@ -71,6 +71,8 @@ It allows developers to send commands from any interface (App, Suite, Studio) to
 
 **HYDRA-UMC-HIL-BRIDGE** sits between a control interface and a robot that may be real or simulated. In real mode a command moves a joint only when the digital twin has signed a fresh interlock certificate for it; in simulation mode the bridge mirrors the position instead. It decides; the transports to the real controller and to the twin are still to come.
 
+> **Platform:** where this README says CM5, it means the pilot bench that runs today; the target platform of HYDRA-UMC is an NVIDIA Jetson Orin NX 16 GB, a design that has not been built or tested.
+
 ## 🏛️ Architecture
 
 The mode-based split at `BRIDGE` and the safety interlock gate on the
