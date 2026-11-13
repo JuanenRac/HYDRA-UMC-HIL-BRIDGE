@@ -70,7 +70,7 @@ jobs:
         shell: bash
         run: |
           bridge=target/debug/hydra-umc-hil-bridge
-          "$bridge" serve --addr 127.0.0.1 --port 18113 --health-open --allow-unsigned-risk --allow-anonymous-real --allow-undated-commands > serve.log 2>&1 &
+          "$bridge" serve --addr 127.0.0.1 --port 18113 --health-open --allow-unsigned-risk --allow-anonymous-real --allow-undated-commands --fault-injection > serve.log 2>&1 &
           server_pid=$!
           trap 'kill "$server_pid" 2>/dev/null || true' EXIT
           for _ in $(seq 1 60); do
