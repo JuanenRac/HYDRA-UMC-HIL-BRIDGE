@@ -16,6 +16,8 @@
 //! HYDRA-UMC-SAFETY-ZONES.
 
 use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use crate::interlock::{assess_optional_interlock, InterlockDecision, TwinRiskReport};
 use crate::protocol::{JointCommand, Mode};
@@ -75,6 +77,28 @@ impl CommandSink for RecordingSink {
     }
 }
 
+/// A clock that only moves when a test or a scenario moves it, so a simulated link can
+/// depend on time without waiting for it. Clones share the same time.
+#[derive(Debug, Clone, Default)]
+pub struct SimClock {
+    now_ms: Arc<AtomicU64>,
+}
+
+impl SimClock {
+    pub fn new() -> Self {
+        SimClock::default()
+    }
+
+    pub fn now_ms(&self) -> u64 {
+        self.now_ms.load(Ordering::SeqCst)
+    }
+
+    pub fn advance(&self, ms: u64) {
+        let now = self.now_ms.load(Ordering::SeqCst);
+        self.now_ms.store(now.saturating_add(ms), Ordering::SeqCst);
+    }
+}
+
 /// A transport stand-in that can simulate the two ways a real link fails
 /// without needing real hardware to provoke them: a connection that
 /// isn't there (`connected = false`) and a link that is too slow
@@ -86,6 +110,13 @@ pub struct SimulatedTransport {
     pub latency_ms: u64,
     pub timeout_ms: u64,
     pub received: Vec<JointCommand>,
+    /// The clock of the scenario, when there is one (see `with_clock`). Without it the
+    /// transport does not look at time at all, as before.
+    pub clock: Option<SimClock>,
+    /// Intervals `[from_ms, to_ms)` of the clock during which the link is down.
+    pub down_windows: Vec<(u64, u64)>,
+    /// For every delivered command, when it arrived: the clock plus the latency.
+    pub arrivals_ms: Vec<u64>,
 }
 
 impl SimulatedTransport {
@@ -98,6 +129,9 @@ impl SimulatedTransport {
             latency_ms: 0,
             timeout_ms: u64::MAX,
             received: Vec::new(),
+            clock: None,
+            down_windows: Vec::new(),
+            arrivals_ms: Vec::new(),
         }
     }
 
@@ -107,12 +141,28 @@ impl SimulatedTransport {
         self
     }
 
+    /// Gives the transport a clock the scenario moves by hand.
+    pub fn with_clock(mut self, clock: SimClock) -> Self {
+        self.clock = Some(clock);
+        self
+    }
+
+    /// The link is down from `from_ms` up to, not including, `to_ms` of the clock.
+    /// It only has an effect together with `with_clock`.
+    pub fn with_down_window(mut self, from_ms: u64, to_ms: u64) -> Self {
+        self.down_windows.push((from_ms, to_ms));
+        self
+    }
+
     pub fn disconnected() -> Self {
         SimulatedTransport {
             connected: false,
             latency_ms: 0,
             timeout_ms: u64::MAX,
             received: Vec::new(),
+            clock: None,
+            down_windows: Vec::new(),
+            arrivals_ms: Vec::new(),
         }
     }
 }
@@ -122,10 +172,24 @@ impl CommandSink for SimulatedTransport {
         if !self.connected {
             return Err(TransportError::Disconnected);
         }
+        if let Some(clock) = &self.clock {
+            let now = clock.now_ms();
+            if self
+                .down_windows
+                .iter()
+                .any(|(from, to)| now >= *from && now < *to)
+            {
+                return Err(TransportError::Disconnected);
+            }
+        }
         if self.latency_ms > self.timeout_ms {
             return Err(TransportError::Timeout {
                 after_ms: self.timeout_ms,
             });
+        }
+        if let Some(clock) = &self.clock {
+            self.arrivals_ms
+                .push(clock.now_ms().saturating_add(self.latency_ms));
         }
         self.received.push(command.clone());
         Ok(())
@@ -458,5 +522,72 @@ mod tests {
         let outcome = bridge.route_command(cmd("j1", 0.5), risk, &mut real, &mut sim);
         assert!(matches!(outcome, RouteOutcome::BlockedByInterlock { .. }));
         assert!(real.received.is_empty());
+    }
+
+    #[test]
+    fn a_transport_without_a_clock_ignores_down_windows_and_keeps_no_arrivals() {
+        let mut transport = SimulatedTransport::healthy().with_down_window(0, 1_000);
+        assert_eq!(transport.send(&cmd("j1", 0.5)), Ok(()));
+        assert!(transport.arrivals_ms.is_empty());
+    }
+
+    #[test]
+    fn a_delivered_command_is_stamped_with_the_clock_plus_the_latency() {
+        let clock = SimClock::new();
+        let mut transport = SimulatedTransport::healthy()
+            .with_timeout(30, 100)
+            .with_clock(clock.clone());
+        clock.advance(500);
+        transport.send(&cmd("j1", 0.1)).unwrap();
+        clock.advance(250);
+        transport.send(&cmd("j1", 0.2)).unwrap();
+        assert_eq!(transport.arrivals_ms, vec![530, 780]);
+    }
+
+    #[test]
+    fn the_link_is_down_inside_the_window_and_back_at_its_end() {
+        let clock = SimClock::new();
+        let mut transport = SimulatedTransport::healthy()
+            .with_clock(clock.clone())
+            .with_down_window(100, 200);
+        assert_eq!(transport.send(&cmd("j1", 0.1)), Ok(()));
+        clock.advance(100);
+        assert_eq!(
+            transport.send(&cmd("j1", 0.2)),
+            Err(TransportError::Disconnected)
+        );
+        clock.advance(99);
+        assert_eq!(
+            transport.send(&cmd("j1", 0.3)),
+            Err(TransportError::Disconnected)
+        );
+        clock.advance(1);
+        assert_eq!(transport.send(&cmd("j1", 0.4)), Ok(()));
+        assert_eq!(transport.received.len(), 2);
+    }
+
+    #[test]
+    fn a_real_mode_command_in_a_down_window_is_a_transport_failure_never_sent_real() {
+        let clock = SimClock::new();
+        let bridge = Bridge::new(Mode::Real);
+        let mut real = SimulatedTransport::healthy()
+            .with_clock(clock.clone())
+            .with_down_window(0, 50);
+        let mut sim = RecordingSink::default();
+        let outcome = bridge.route_command(cmd("j1", 0.5), Some(clear()), &mut real, &mut sim);
+        assert!(matches!(outcome, RouteOutcome::TransportFailure { .. }));
+        clock.advance(50);
+        let outcome = bridge.route_command(cmd("j1", 0.5), Some(clear()), &mut real, &mut sim);
+        assert_eq!(outcome, RouteOutcome::SentReal);
+    }
+
+    #[test]
+    fn clones_of_a_clock_share_the_same_time() {
+        let clock = SimClock::new();
+        let other = clock.clone();
+        clock.advance(7);
+        assert_eq!(other.now_ms(), 7);
+        other.advance(u64::MAX);
+        assert_eq!(clock.now_ms(), u64::MAX);
     }
 }
