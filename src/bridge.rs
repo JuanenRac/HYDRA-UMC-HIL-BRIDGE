@@ -85,6 +85,8 @@ pub struct SimClock {
 }
 
 impl SimClock {
+    // Only the scenarios of the tests make a clock; the service binary never calls this.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn new() -> Self {
         SimClock::default()
     }
@@ -93,6 +95,8 @@ impl SimClock {
         self.now_ms.load(Ordering::SeqCst)
     }
 
+    // Only the scenarios of the tests move a clock by hand; the service binary never calls this.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn advance(&self, ms: u64) {
         let now = self.now_ms.load(Ordering::SeqCst);
         self.now_ms.store(now.saturating_add(ms), Ordering::SeqCst);
@@ -142,6 +146,8 @@ impl SimulatedTransport {
     }
 
     /// Gives the transport a clock the scenario moves by hand.
+    // Only the scenarios of the tests move a clock by hand; the service binary never calls this.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn with_clock(mut self, clock: SimClock) -> Self {
         self.clock = Some(clock);
         self
@@ -149,6 +155,8 @@ impl SimulatedTransport {
 
     /// The link is down from `from_ms` up to, not including, `to_ms` of the clock.
     /// It only has an effect together with `with_clock`.
+    // Only the scenarios of the tests move a clock by hand; the service binary never calls this.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn with_down_window(mut self, from_ms: u64, to_ms: u64) -> Self {
         self.down_windows.push((from_ms, to_ms));
         self
