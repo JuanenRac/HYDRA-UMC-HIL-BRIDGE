@@ -165,4 +165,126 @@ mod tests {
         assert!(!constant_time_eq(b"abc", b"abd"));
         assert!(!constant_time_eq(b"abc", b"ab"));
     }
+
+    #[test]
+    fn sha256_padding_boundaries_match_the_reference() {
+        // Lengths around the padding boundaries (55/56 bytes decide whether the length field fits in the block; 64 is one full block).
+        let known: [(usize, &str); 12] = [
+            (
+                1,
+                "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb",
+            ),
+            (
+                55,
+                "9f4390f8d30c2dd92ec9f095b65e2b9ae9b0a925a5258e241c9f1e910f734318",
+            ),
+            (
+                56,
+                "b35439a4ac6f0948b6d6f9e3c6af0f5f590ce20f1bde7090ef7970686ec6738a",
+            ),
+            (
+                57,
+                "f13b2d724659eb3bf47f2dd6af1accc87b81f09f59f2b75e5c0bed6589dfe8c6",
+            ),
+            (
+                63,
+                "7d3e74a05d7db15bce4ad9ec0658ea98e3f06eeecf16b4c6fff2da457ddc2f34",
+            ),
+            (
+                64,
+                "ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb",
+            ),
+            (
+                65,
+                "635361c48bb9eab14198e76ea8ab7f1a41685d6ad62aa9146d301d4f17eb0ae0",
+            ),
+            (
+                119,
+                "31eba51c313a5c08226adf18d4a359cfdfd8d2e816b13f4af952f7ea6584dcfb",
+            ),
+            (
+                120,
+                "2f3d335432c70b580af0e8e1b3674a7c020d683aa5f73aaaedfdc55af904c21c",
+            ),
+            (
+                127,
+                "c57e9278af78fa3cab38667bef4ce29d783787a2f731d4e12200270f0c32320a",
+            ),
+            (
+                128,
+                "6836cf13bac400e9105071cd6af47084dfacad4e5e302c94bfed24e013afb73e",
+            ),
+            (
+                1000,
+                "41edece42d63e8d9bf515a9ba6932e1c20cbc9f5a5d134645adb5db1b9737ea3",
+            ),
+        ];
+        for (length, digest) in known {
+            assert_eq!(to_hex(&sha256(&vec![b'a'; length])), digest, "{length}");
+        }
+    }
+
+    #[test]
+    fn hmac_matches_more_rfc_4231_cases() {
+        // test case 3: a key and a message made of repeated bytes
+        assert_eq!(
+            to_hex(&hmac_sha256(&[0xaa; 20], &[0xdd; 50])),
+            "773ea91e36800e46854db8ebd09181a72959098b3ef8c122d9635514ced565fe"
+        );
+        // test case 4: a key of 25 different bytes
+        let key: Vec<u8> = (1u8..=25).collect();
+        assert_eq!(
+            to_hex(&hmac_sha256(&key, &[0xcd; 50])),
+            "82558a389a443c0ea4cc819899f2083a85f0faa3e578f8077a2e3ff46729665b"
+        );
+        // test case 7: a key and a message both longer than the block
+        assert_eq!(
+            to_hex(&hmac_sha256(
+                &[0xaa; 131],
+                b"This is a test using a larger than block-size key and a larger than block-size data. The key needs to be hashed before being used by the HMAC algorithm."
+            )),
+            "9b09ffa71b942fcb27635fbcd5b0e944bfdc63644f0713938a7f51535c3a35e2"
+        );
+    }
+
+    #[test]
+    fn hmac_keys_at_the_block_size_and_the_empty_key() {
+        // 64 bytes is used as it is; 65 bytes is hashed first; an empty key is allowed (zero padded)
+        assert_eq!(
+            to_hex(&hmac_sha256(&[b'k'; 64], b"m")),
+            "3b7a8d453e76edb519238a515105a57508d0f169f480ebeee120a9e7803289fa"
+        );
+        assert_eq!(
+            to_hex(&hmac_sha256(&[b'k'; 65], b"m")),
+            "c2d7d4c2256ddb097409ec0c67e1d58fa1a007fc6932cac0d892a525d08af7cc"
+        );
+        assert_eq!(
+            to_hex(&hmac_sha256(b"", b"")),
+            "b613679a0814d9ec772f95d778c35fc5ff1697c493715653c6c712144292c5ad"
+        );
+    }
+
+    #[test]
+    fn sign_is_the_hmac_of_timestamp_dot_body() {
+        assert_eq!(
+            sign(b"secret", "1700000000", br#"{"a":1}"#),
+            "49f24e537407743fa4a0242bb63b94b9a47ee99cbbe071ccd8a22550ae411686"
+        );
+        // the dot is part of the message: moving a byte across it changes the signature
+        assert_ne!(sign(b"k", "12", b"3"), sign(b"k", "1", b"23"));
+    }
+
+    #[test]
+    fn to_hex_is_lowercase_two_digits_per_byte() {
+        assert_eq!(to_hex(&[]), "");
+        assert_eq!(to_hex(&[0x00, 0x0f, 0xa0, 0xff]), "000fa0ff");
+    }
+
+    #[test]
+    fn constant_time_eq_handles_empty_and_single_bit_differences() {
+        assert!(constant_time_eq(b"", b""));
+        assert!(!constant_time_eq(b"", b"a"));
+        assert!(!constant_time_eq(&[0b0000_0000], &[0b1000_0000]));
+        assert!(!constant_time_eq(&[0xff, 0x00], &[0xff, 0x01]));
+    }
 }

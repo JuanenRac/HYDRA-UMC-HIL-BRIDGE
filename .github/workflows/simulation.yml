@@ -56,4 +56,43 @@ jobs:
           expect 3 route --mode real --joint j1 --position 0.5 --clear-distance 2.0 --transport-disconnected
           expect 3 route --mode real --joint j1 --position 0.5 --clear-distance 2.0 --transport-latency-ms 500 --transport-timeout-ms 100
           expect 2 route --joint j1 --position 0.5
+          expect 0 route --mode simulation --joint j1 --position 0.5 --collision-risk --distance 0.01
+          expect 2 route --mode bogus --joint j1 --position 0.5
+          expect 2 route --mode real --joint j1 --position inf --clear-distance 2.0
+          expect 2 route --mode real --joint j1 --position 0.5 --collision-risk --distance abc
+          expect 2 route --mode real --joint j1 --position 0.5 --clear-distance abc
+          expect 2 route --mode real --position 0.5 --clear-distance 2.0
+          expect 0 mirror --joint j1 --position 0.25
+          expect 2 mirror --joint j1 --position NaN
+          expect 0   # no arguments: the banner
           echo "SIMULATION_ROUTES=OK"
+      - name: Serve the HTTP API on loopback and send it good and bad orders
+        shell: bash
+        run: |
+          bridge=target/debug/hydra-umc-hil-bridge
+          "$bridge" serve --addr 127.0.0.1 --port 18113 --health-open --allow-unsigned-risk --allow-anonymous-real > serve.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 60); do
+            curl -fs http://127.0.0.1:18113/health > /dev/null && break
+            sleep 0.5
+          done
+          post() { curl -s -o body.txt -w '%{http_code}' -X POST -H 'Content-Type: application/json' --data "$2" "http://127.0.0.1:18113$1"; }
+          check() {
+            want_status="$1"; want_text="$2"; got_status="$3"
+            echo "status $got_status: $(cat body.txt)"
+            test "$got_status" = "$want_status"
+            grep -q "$want_text" body.txt
+          }
+          check 200 SentReal "$(post /route '{"mode":"real","joint":"j1","position":0.5,"risk":{"collision_imminent":false,"distance_m":2.0}}')"
+          check 200 BlockedByInterlock "$(post /route '{"mode":"real","joint":"j1","position":0.5}')"
+          check 200 BlockedByInterlock "$(post /route '{"mode":"real","joint":"j1","position":0.5,"risk":{"collision_imminent":true,"distance_m":0.1}}')"
+          check 200 SentSimulation "$(post /route '{"mode":"simulation","joint":"j1","position":0.5,"risk":{"collision_imminent":true,"distance_m":0.1}}')"
+          check 200 TransportFailure "$(post /route '{"mode":"real","joint":"j1","position":0.5,"risk":{"collision_imminent":false,"distance_m":2.0},"transport":{"disconnected":true}}')"
+          check 200 '"mirrored":true' "$(post /mirror '{"joint":"j2","position":0.5}')"
+          test "$(post /route 'not json')" = 400
+          test "$(post /route "{\"mode\":\"simulation\",\"joint\":\"$(printf 'a%.0s' $(seq 1 20000))\",\"position\":1.0}")" = 413
+          check 200 SentSimulation "$(post /route '{"mode":"simulation","joint":"j1","position":0.5}')"
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18113/nowhere)" = 404
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18113/health)" = 200
+          echo "SIMULATION_SERVE=OK"

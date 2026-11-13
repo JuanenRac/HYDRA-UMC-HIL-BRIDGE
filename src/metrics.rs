@@ -293,4 +293,133 @@ pub(crate) mod tests {
             1
         );
     }
+
+    fn bucket(text: &str, le: &str) -> u64 {
+        let needle = format!("t_seconds_bucket{{mode=\"m\",le=\"{le}\"}} ");
+        let line = text
+            .lines()
+            .find(|l| l.starts_with(&needle))
+            .unwrap_or_else(|| panic!("no bucket {le}"));
+        line[needle.len()..].parse().unwrap()
+    }
+
+    fn render(h: &Histogram) -> String {
+        exposition_with_histograms(
+            "1",
+            &[],
+            &[HistogramSeries {
+                name: "t_seconds",
+                help: "t",
+                label: ("mode", "m"),
+                histogram: h,
+            }],
+        )
+    }
+
+    #[test]
+    fn a_value_exactly_on_a_bound_belongs_to_that_bucket() {
+        for (i, bound) in LATENCY_BOUNDS_S.iter().enumerate() {
+            let mut h = Histogram::default();
+            h.observe(*bound);
+            let text = render(&h);
+            assert_valid_exposition(&text);
+            let le = format!("{bound}");
+            assert_eq!(bucket(&text, &le), 1, "bound {bound}");
+            if i > 0 {
+                let below = format!("{}", LATENCY_BOUNDS_S[i - 1]);
+                assert_eq!(bucket(&text, &below), 0, "below {bound}");
+            }
+        }
+    }
+
+    #[test]
+    fn nonsense_and_huge_durations_are_counted_without_poisoning_the_sum() {
+        let mut h = Histogram::default();
+        h.observe(-3.0);
+        h.observe(f64::INFINITY);
+        h.observe(f64::NEG_INFINITY);
+        h.observe(f64::NAN);
+        h.observe(1.0e9);
+        let text = render(&h);
+        assert_valid_exposition(&text);
+        assert!(!text.contains("NaN") && !text.contains(" inf"), "{text}");
+        assert_eq!(h.count(), 5);
+        // the four nonsense values count as zero (first bucket); the huge one is only in +Inf
+        assert_eq!(bucket(&text, "0.001"), 4);
+        assert_eq!(bucket(&text, "5"), 4);
+        assert_eq!(bucket(&text, "+Inf"), 5);
+        assert!(text.contains("t_seconds_sum{mode=\"m\"} 1000000000"));
+    }
+
+    #[test]
+    fn buckets_never_decrease_and_the_last_one_is_the_count() {
+        let mut h = Histogram::default();
+        // a fixed pseudo-random walk (no clock, no randomness from outside)
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        for _ in 0..500 {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            h.observe((state % 7000) as f64 / 1000.0);
+        }
+        let text = render(&h);
+        assert_valid_exposition(&text);
+        let mut last = 0;
+        for bound in LATENCY_BOUNDS_S {
+            let now = bucket(&text, &format!("{bound}"));
+            assert!(now >= last, "{bound}: {now} < {last}");
+            last = now;
+        }
+        assert!(bucket(&text, "+Inf") >= last);
+        assert_eq!(bucket(&text, "+Inf"), 500);
+        assert!(text.contains("t_seconds_count{mode=\"m\"} 500"));
+    }
+
+    #[test]
+    fn an_empty_histogram_is_all_zeros_and_a_new_name_is_declared_once() {
+        let h = Histogram::default();
+        let text = exposition_with_histograms(
+            "1",
+            &[Series::gauge("g_value", "A gauge.", 1.5)],
+            &[
+                HistogramSeries {
+                    name: "t_seconds",
+                    help: "t",
+                    label: ("mode", "a"),
+                    histogram: &h,
+                },
+                HistogramSeries {
+                    name: "t_seconds",
+                    help: "t",
+                    label: ("mode", "b"),
+                    histogram: &h,
+                },
+            ],
+        );
+        assert_valid_exposition(&text);
+        assert_eq!(text.matches("# TYPE t_seconds histogram").count(), 1);
+        assert!(text.contains("g_value 1.5"));
+        assert!(text.contains("t_seconds_count{mode=\"a\"} 0"));
+        assert!(text.contains("t_seconds_count{mode=\"b\"} 0"));
+        assert!(text.contains("t_seconds_sum{mode=\"a\"} 0"));
+        assert!(text.contains("t_seconds_bucket{mode=\"b\",le=\"+Inf\"} 0"));
+    }
+
+    #[test]
+    fn counters_gauges_and_labels_are_written_with_their_kind() {
+        let text = exposition(
+            "0.0.1",
+            &[
+                Series::counter("c_total", "C.", 0),
+                Series::gauge("g_negative", "G.", -2.5),
+                Series::labelled_counter("l_total", "L.", ("reason", "x"), 18_446_744_073_709),
+            ],
+        );
+        assert_valid_exposition(&text);
+        assert!(text.contains("# TYPE c_total counter"));
+        assert!(text.contains("# TYPE g_negative gauge"));
+        assert!(text.contains("g_negative -2.5"));
+        assert!(text.contains("l_total{reason=\"x\"} 18446744073709"));
+        assert!(text.contains("c_total 0"));
+    }
 }
