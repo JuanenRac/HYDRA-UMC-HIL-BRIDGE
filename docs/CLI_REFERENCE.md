@@ -253,6 +253,7 @@ command, too old, from the future or already used, answers `200` with `{"Blocked
 | `--twin-public-key-file FILE` | `HYDRA_UMC_HIL_BRIDGE_TWIN_KEY_FILE` | The trusted public key(s) of the twin, one 64-hex per line. Without one every real command is blocked. |
 | `--certificate-max-age-ms N` | | Oldest certificate accepted, 1 to 60000 (default 2000). |
 | `--allow-unsigned-risk` | `HYDRA_UMC_HIL_BRIDGE_ALLOW_UNSIGNED_RISK=1` | Bench setting: believe the `risk` the caller wrote, in real mode. Off by default; announced at every start. |
+| `--allow-anonymous-real` | `HYDRA_UMC_HIL_BRIDGE_ALLOW_ANONYMOUS_REAL=1` | Bench setting: believe a real order from a caller with no Bearer token and no identity of HYDRA-UMC-SERVER. Off by default: a real order without either answers `401` (after it is recorded in the audit log) and is not forwarded; simulation is not affected. Announced at every start. |
 | `--require-twin-pass` | `HYDRA_UMC_HIL_BRIDGE_REQUIRE_TWIN_PASS=1` | Also require the pass verdict of the twin for the trajectory of a real command, and lock the switch on (see `docs/TWIN_PASS.md`). Off by default. |
 | `--twin-robot-id NAME` | `HYDRA_UMC_HIL_BRIDGE_TWIN_ROBOT_ID` | The robot a verdict must be for. |
 | `--twin-pass-file FILE` | | Where the value of `require_twin_pass` is kept (`{"require_twin_pass": true}`). |
