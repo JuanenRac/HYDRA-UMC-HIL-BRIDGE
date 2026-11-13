@@ -638,6 +638,12 @@ fn run_serve(args: &[String]) -> ExitCode {
         eprintln!("[hil-bridge] tokens of HYDRA-UMC-SERVER accepted: every route needs an identity, a viewer may read but not command");
     }
 
+    // A real order is refused unless it carries the token or an identity of the server: on by default, the bench setting turns it off (and is announced).
+    let require_identity_for_real = !(has_flag(args, "--allow-anonymous-real")
+        || env::var("HYDRA_UMC_HIL_BRIDGE_ALLOW_ANONYMOUS_REAL")
+            .map(|v| v == "1")
+            .unwrap_or(false));
+
     let interlock = match load_interlock(args) {
         Ok(interlock) => interlock,
         Err(message) => {
@@ -765,6 +771,11 @@ fn run_serve(args: &[String]) -> ExitCode {
             } else {
                 eprintln!("[hil-bridge] the pass verdict of the twin is not required (require_twin_pass is off; --require-twin-pass or POST /settings/twin-pass turns it on)");
             }
+            if require_identity_for_real {
+                eprintln!("[hil-bridge] a real order needs the Bearer token or a valid identity of HYDRA-UMC-SERVER, wherever it comes from; simulation does not (--allow-anonymous-real is the bench setting)");
+            } else {
+                eprintln!("[hil-bridge] WARNING: --allow-anonymous-real is ON: a real order from a caller with no token and no identity is believed (bench use only)");
+            }
             if interlock.allow_unsigned_risk {
                 eprintln!("[hil-bridge] WARNING: --allow-unsigned-risk is ON: a risk report written by the caller is believed in real mode (bench use only)");
             }
@@ -807,6 +818,7 @@ fn run_serve(args: &[String]) -> ExitCode {
                     safety_zones: safety_zones.map(|(zones, _)| zones),
                     recorder,
                     replay_max_points,
+                    require_identity_for_real,
                 },
             );
             ExitCode::SUCCESS

@@ -262,6 +262,10 @@ pub struct ServerConfig {
     pub recorder: Option<Arc<Recorder>>,
     /// `--replay-max-points`: the most points `POST /replay` reads from the lake (0: `DEFAULT_REPLAY_MAX_POINTS`).
     pub replay_max_points: usize,
+    /// A real order is forwarded only when its request carried the Bearer token or a valid identity of HYDRA-UMC-SERVER; without either it is refused with
+    /// `401` (after it is recorded in the audit log), whatever the address it came from. Simulation is not affected. `serve` turns it on unless
+    /// `--allow-anonymous-real` is given; the default of the struct is off so that the earlier tests keep their meaning.
+    pub require_identity_for_real: bool,
 }
 
 /// How old the state of the zones may be when nothing else is said.
@@ -923,6 +927,7 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
                             sim_robot: config.sim_robot.as_deref(),
                             recorder: config.recorder.as_deref(),
                             twin_pass_robot_id: &config.twin_pass.robot_id,
+                            require_identity_for_real: config.require_identity_for_real,
                         },
                         &info,
                     );
@@ -1066,6 +1071,8 @@ struct RouteContext<'a> {
     recorder: Option<&'a Recorder>,
     /// The robot a pass verdict of the twin must be for (`--twin-robot-id`).
     twin_pass_robot_id: &'a str,
+    /// A real order needs an authenticated request (see `ServerConfig::require_identity_for_real`).
+    require_identity_for_real: bool,
 }
 
 fn audit_entry(
@@ -1165,6 +1172,16 @@ fn handle_route(raw: &str, state: &mut State, context: &RouteContext, info: &Req
                 json!({"error": "the order could not be recorded in the audit log, so it was not forwarded"}),
             );
         }
+    }
+
+    // Without the token or the identity of the server the caller is only an address: a real order is not forwarded (it was recorded above).
+    if req.mode == Mode::Real && context.require_identity_for_real && !info.authenticated {
+        stats.unauthorized += 1;
+        return Reply::json(
+            401,
+            json!({"error": "a real order needs the Bearer token or a valid identity of HYDRA-UMC-SERVER; it was not forwarded (--allow-anonymous-real is the bench setting)"}),
+        )
+        .with("WWW-Authenticate", "Bearer");
     }
 
     let mut recording_real = RecordingSink::default();
@@ -2413,6 +2430,73 @@ mod tests {
         let body = b64(format!(r#"{{"username":"ana","role":"{role}","exp":{exp}}}"#).as_bytes());
         let mac = crate::hmac::hmac_sha256(key, format!("{head}.{body}").as_bytes());
         format!("{head}.{body}.{}", b64(&mac))
+    }
+
+    fn identity_required_config() -> ServerConfig {
+        ServerConfig {
+            require_identity_for_real: true,
+            interlock: InterlockConfig {
+                allow_unsigned_risk: true,
+                ..InterlockConfig::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_real_order_without_a_token_or_an_identity_is_refused_but_simulation_is_not() {
+        let port = start_with(identity_required_config());
+        let real = r#"{"mode":"real","joint":"shoulder","position":1.0,"risk":{"collision_imminent":false,"distance_m":2.0}}"#;
+        let (status, resp) = post_with(port, "/route", "", real);
+        assert_eq!(status, 401);
+        assert!(resp.contains("not forwarded"), "{resp}");
+        let simulation = r#"{"mode":"simulation","joint":"shoulder","position":1.0}"#;
+        assert_eq!(post_with(port, "/route", "", simulation).0, 200);
+        // the order was recorded before it was refused, and nothing was routed to the robot
+        let (_, stats) = get_with(port, "/stats", "");
+        assert!(stats.contains("\"routedReal\":0"), "{stats}");
+        assert!(stats.contains("\"unauthorized\":1"), "{stats}");
+    }
+
+    #[test]
+    fn a_real_order_with_the_token_goes_on_to_the_interlock() {
+        let mut config = identity_required_config();
+        config.token = Some(TEST_TOKEN.to_string());
+        let port = start_with(config);
+        let real = r#"{"mode":"real","joint":"shoulder","position":1.0,"risk":{"collision_imminent":false,"distance_m":2.0}}"#;
+        let auth = format!("Authorization: Bearer {TEST_TOKEN}\r\n");
+        let (status, resp) = post_with(port, "/route", &auth, real);
+        assert_eq!(status, 200);
+        assert!(resp.contains("SentReal"), "{resp}");
+    }
+
+    #[test]
+    fn a_real_order_with_the_identity_of_the_server_goes_on_and_a_viewer_never_does() {
+        let key = b"0123456789abcdef0123456789abcdef".to_vec();
+        let mut config = identity_required_config();
+        config.identity_key = Some(key.clone());
+        let port = start_with(config);
+        let real = r#"{"mode":"real","joint":"shoulder","position":1.0,"risk":{"collision_imminent":false,"distance_m":2.0}}"#;
+        let admin = format!(
+            "Authorization: Bearer {}\r\n",
+            server_token(&key, "operator")
+        );
+        let (status, resp) = post_with(port, "/route", &admin, real);
+        assert_eq!(status, 200);
+        assert!(resp.contains("SentReal"), "{resp}");
+        let viewer = format!("Authorization: Bearer {}\r\n", server_token(&key, "viewer"));
+        assert_eq!(post_with(port, "/route", &viewer, real).0, 401);
+    }
+
+    #[test]
+    fn the_bench_setting_leaves_the_earlier_behaviour() {
+        let mut config = identity_required_config();
+        config.require_identity_for_real = false;
+        let port = start_with(config);
+        let real = r#"{"mode":"real","joint":"shoulder","position":1.0,"risk":{"collision_imminent":false,"distance_m":2.0}}"#;
+        let (status, resp) = post_with(port, "/route", "", real);
+        assert_eq!(status, 200);
+        assert!(resp.contains("SentReal"), "{resp}");
     }
 
     #[test]
