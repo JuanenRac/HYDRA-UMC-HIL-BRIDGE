@@ -1,0 +1,55 @@
+# =============================================================================
+# HYDRA-UMC-HIL-BRIDGE - Coverage
+# Copyright (C) 2026 JuanenRac (Electro Hobby 3D) <electrohobby3d@gmail.com>
+# GPL-3.0-or-later - see LICENSE
+#
+# Measures the line coverage of the unit tests and fails when the total falls under the floor.
+# The floor only goes up: raise COVERAGE_FLOOR when the measured value rises.
+# =============================================================================
+name: Coverage
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  COVERAGE_FLOOR: "92"
+
+jobs:
+  coverage:
+    name: Line coverage with a floor
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up the stable Rust toolchain with the LLVM tools
+        run: |
+          rustup toolchain install stable --profile minimal --component llvm-tools-preview
+          rustup default stable
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov --locked
+      - name: Run the tests under coverage
+        run: cargo llvm-cov --locked --all-targets --summary-only | tee cover.txt
+      - name: Report the coverage and enforce the floor
+        shell: bash
+        run: |
+          total="$(awk '/^TOTAL/ {gsub("%","",$10); print $10}' cover.txt)"
+          {
+            echo "### Line coverage"
+            echo
+            echo "Total: ${total}% (floor ${COVERAGE_FLOOR}%)"
+            echo
+            echo '```'
+            cat cover.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "COVERAGE_TOTAL=${total}"
+          test -n "$total"
+          awk -v t="$total" -v f="$COVERAGE_FLOOR" 'BEGIN { exit !(t+0 >= f+0) }' || { echo "::error::coverage ${total}% is under the floor ${COVERAGE_FLOOR}%"; exit 1; }

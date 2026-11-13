@@ -74,6 +74,73 @@ mod tests {
         assert!(cmd("shoulder", f64::INFINITY).validate().is_err());
         assert!(cmd("shoulder", f64::NEG_INFINITY).validate().is_err());
     }
+
+    #[test]
+    fn the_limits_of_a_joint_name_are_exact() {
+        assert!(cmd(&"j".repeat(MAX_JOINT_NAME_LEN), 0.0).validate().is_ok());
+        assert!(cmd("a", 0.0).validate().is_ok());
+        // the length is counted in bytes: 33 two-byte characters are 66 bytes
+        assert!(cmd(&"é".repeat(33), 0.0).validate().is_err());
+        assert!(cmd(&"é".repeat(32), 0.0).validate().is_ok());
+        // a name that is only whitespace of any kind is empty
+        assert!(cmd("\t\n ", 0.0).validate().is_err());
+    }
+
+    #[test]
+    fn extreme_but_finite_positions_are_shape_valid() {
+        for position in [0.0, -0.0, f64::MAX, f64::MIN, f64::MIN_POSITIVE, -1.0e-300] {
+            assert!(cmd("j", position).validate().is_ok(), "{position}");
+        }
+    }
+
+    #[test]
+    fn the_refusals_say_which_rule_was_broken() {
+        let empty = cmd("", 1.0).validate().unwrap_err();
+        let long = cmd(&"j".repeat(MAX_JOINT_NAME_LEN + 1), 1.0)
+            .validate()
+            .unwrap_err();
+        let nan = cmd("j", f64::NAN).validate().unwrap_err();
+        assert!(empty.contains("empty"), "{empty}");
+        assert!(long.contains(&MAX_JOINT_NAME_LEN.to_string()), "{long}");
+        assert!(nan.contains("finite"), "{nan}");
+    }
+
+    #[test]
+    fn a_command_round_trips_through_json_and_unknown_shapes_are_refused() {
+        let original = cmd("shoulder", -1.5);
+        let text = serde_json::to_string(&original).unwrap();
+        assert_eq!(text, r#"{"joint":"shoulder","position":-1.5}"#);
+        assert_eq!(
+            serde_json::from_str::<JointCommand>(&text).unwrap(),
+            original
+        );
+        for bad in [
+            r#"{"joint":"j"}"#,
+            r#"{"position":1.0}"#,
+            r#"{"joint":5,"position":1.0}"#,
+            r#"{"joint":"j","position":"1.0"}"#,
+            r#"[]"#,
+            r#""#,
+        ] {
+            assert!(serde_json::from_str::<JointCommand>(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_mode_is_spelled_in_lowercase_and_nothing_else_is_a_mode() {
+        assert_eq!(serde_json::to_string(&Mode::Real).unwrap(), r#""real""#);
+        assert_eq!(
+            serde_json::to_string(&Mode::Simulation).unwrap(),
+            r#""simulation""#
+        );
+        assert_eq!(
+            serde_json::from_str::<Mode>(r#""real""#).unwrap(),
+            Mode::Real
+        );
+        for bad in [r#""Real""#, r#""REAL""#, r#""sim""#, r#""""#, "1", "null"] {
+            assert!(serde_json::from_str::<Mode>(bad).is_err(), "{bad}");
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
