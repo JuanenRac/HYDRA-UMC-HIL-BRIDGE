@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 env:
-  COVERAGE_FLOOR: "0"
+  COVERAGE_FLOOR: "92"
 
 jobs:
   coverage:
