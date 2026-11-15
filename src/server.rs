@@ -2169,9 +2169,8 @@ mod tests {
 
     #[test]
     fn stats_reports_real_process_lifetime_counters() {
-        // Found while auditing the code: /stats
-        // used to be a hardcoded static JSON body with nothing real to
-        // aggregate. One of each real outcome is driven through /route
+        // /stats aggregates real process counters, not a static JSON body.
+        // One of each real outcome is driven through /route
         // and /mirror, then /stats must reflect every one of them.
         let port = start_test_server();
 

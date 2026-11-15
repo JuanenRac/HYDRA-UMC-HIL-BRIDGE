@@ -272,7 +272,7 @@ impl Bridge {
     /// Routes one command according to the bridge's current mode. A
     /// `Real`-mode command is only forwarded to `real_sink` if the
     /// interlock allows it; a `risk` of `None` BLOCKS it (fail closed: no twin report
-    /// is not the same as no risk, and omitting the report used to be enough to
+    /// is not the same as no risk, and omitting the report must never be enough to
     /// reach the hardware).
     /// `Simulation`-mode commands always reach `sim_sink`, ungated - see
     /// `protocol::Mode::Simulation`'s own docs for why.
