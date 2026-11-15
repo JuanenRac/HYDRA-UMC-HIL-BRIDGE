@@ -4,6 +4,7 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+- **Comments describe what the code does, not what it used to do:** the notes in the source and the tests say the present behaviour and the reason for it. Comments only: no behaviour changes.
 - **The SDK pin and the shared tools are up to date:** the SDK dependency names the newest release tag, and the shared tools are the canonical copies again.
 - **The simulated clock of the scenarios no longer fails the lint of the service binary:** `SimClock::new`, `SimClock::advance`, `with_clock` and `with_down_window` are only used by the tests, so `cargo clippy -D warnings` called them dead code in the binary and the CI of main failed. They now say so (`allow(dead_code)` outside the tests). No change of behaviour.
 - **The simulated transport can follow a clock that the scenario moves (the default is unchanged):** `SimClock` is a time that only moves when told to; with `with_clock` a delivered command is stamped with the clock plus the latency (`arrivals_ms`), and `with_down_window` takes the link down for an interval of that clock, so a real-mode command inside it is a transport failure and never reported as sent. Without a clock the transport looks at no time, exactly as before. 5 tests.
