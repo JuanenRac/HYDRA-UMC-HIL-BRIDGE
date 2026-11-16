@@ -30,7 +30,7 @@ verdict says `pass`. The switch is called `require_twin_pass`. **It is off by de
 6. it is for the robot named by `--twin-robot-id`, its nonce has 32 hexadecimal characters and it is inside its window (1 s of future skew allowed);
 7. the command (same joint, same position) is a point of the trajectory that was not sent yet.
 
-One verdict covers a whole trajectory, which is sent as many commands, so the verdict is not used up by the first one; each point of it is good for **one**
+One verdict covers a whole trajectory, which is sent as many commands, so the verdict is not used up by the first one; each point of it (a joint of a sample) is good for **one**
 command. A point is marked when its command was really sent, not when it was refused. A refusal does not use up the certificate the command carries. The
 verdicts remembered are bounded (the expired ones are forgotten first). The answer of a refused command says why, and the audit log records it like any other
 blocked order.

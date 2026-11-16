@@ -94,7 +94,8 @@ pub fn signed_text(v: &Verdict, sha256: &str) -> String {
 #[derive(Debug)]
 struct Entry {
     valid_until_ms: u64,
-    used: HashSet<usize>,
+    /// The points already sent: the sample and the joint, because a command moves one joint and a sample has all of them.
+    used: HashSet<(usize, String)>,
 }
 
 /// The points of the trajectories already sent, per verdict.
@@ -105,16 +106,26 @@ pub struct VerdictLedger {
 }
 
 impl VerdictLedger {
-    /// The first of `candidates` (indexes of the samples that match a command) not sent yet under this verdict.
-    pub fn first_unused(&self, nonce: &str, candidates: &[usize]) -> Option<usize> {
+    /// The first of `candidates` (indexes of the samples that match a command for `joint`) not sent yet for that joint under this verdict.
+    pub fn first_unused(&self, nonce: &str, joint: &str, candidates: &[usize]) -> Option<usize> {
         match self.entries.get(nonce) {
             None => candidates.first().copied(),
-            Some(entry) => candidates.iter().copied().find(|i| !entry.used.contains(i)),
+            Some(entry) => candidates
+                .iter()
+                .copied()
+                .find(|i| !entry.used.contains(&(*i, joint.to_string()))),
         }
     }
 
     /// Remember that this point was sent.
-    pub fn mark(&mut self, nonce: &str, valid_until_ms: u64, index: usize, now_ms: u64) {
+    pub fn mark(
+        &mut self,
+        nonce: &str,
+        valid_until_ms: u64,
+        index: usize,
+        joint: &str,
+        now_ms: u64,
+    ) {
         if !self.entries.contains_key(nonce) {
             self.forget_expired(now_ms);
             while self.order.len() >= LEDGER_CAPACITY {
@@ -132,7 +143,7 @@ impl VerdictLedger {
             );
         }
         if let Some(entry) = self.entries.get_mut(nonce) {
-            entry.used.insert(index);
+            entry.used.insert((index, joint.to_string()));
         }
     }
 
@@ -239,7 +250,7 @@ pub fn check(
     if candidates.is_empty() {
         return Err("this command is not a point of the trajectory the twin passed".into());
     }
-    match ledger.first_unused(&v.nonce, &candidates) {
+    match ledger.first_unused(&v.nonce, &command.joint, &candidates) {
         Some(index) => Ok(Matched {
             nonce: v.nonce.clone(),
             valid_until_ms: v.valid_until_ms,
@@ -485,16 +496,58 @@ mod tests {
         let mut ledger = VerdictLedger::default();
         let first = run(&proof(), &command("elbow", 0.5), &ledger).unwrap();
         assert_eq!(first.index, 0);
-        ledger.mark(&first.nonce, first.valid_until_ms, first.index, NOW);
+        ledger.mark(
+            &first.nonce,
+            first.valid_until_ms,
+            first.index,
+            "elbow",
+            NOW,
+        );
         // the same position appears in two samples: the second one is used next
         let second = run(&proof(), &command("elbow", 0.5), &ledger).unwrap();
         assert_eq!(second.index, 1);
-        ledger.mark(&second.nonce, second.valid_until_ms, second.index, NOW);
+        ledger.mark(
+            &second.nonce,
+            second.valid_until_ms,
+            second.index,
+            "elbow",
+            NOW,
+        );
         assert!(run(&proof(), &command("elbow", 0.5), &ledger)
             .unwrap_err()
             .contains("already sent"));
         // another point of the same verdict still goes
         assert!(run(&proof(), &command("shoulder", 0.5), &ledger).is_ok());
+    }
+
+    #[test]
+    fn the_other_joints_of_a_sample_still_go_after_one_joint_was_sent() {
+        let mut ledger = VerdictLedger::default();
+        // sample 0 is {shoulder 0.0, elbow 0.5}: sending the elbow must not use up the shoulder of the same sample
+        let elbow = run(&proof(), &command("elbow", 0.5), &ledger).unwrap();
+        assert_eq!(elbow.index, 0);
+        ledger.mark(
+            &elbow.nonce,
+            elbow.valid_until_ms,
+            elbow.index,
+            "elbow",
+            NOW,
+        );
+        let shoulder = run(&proof(), &command("shoulder", 0.0), &ledger).unwrap();
+        assert_eq!(shoulder.index, 0);
+        ledger.mark(
+            &shoulder.nonce,
+            shoulder.valid_until_ms,
+            shoulder.index,
+            "shoulder",
+            NOW,
+        );
+        // each joint of a sample is still good for one command only
+        assert!(run(&proof(), &command("shoulder", 0.0), &ledger)
+            .unwrap_err()
+            .contains("already sent"));
+        let again = run(&proof(), &command("elbow", 0.5), &ledger).unwrap();
+        assert_eq!(again.index, 1);
     }
 
     #[test]
@@ -508,13 +561,13 @@ mod tests {
     #[test]
     fn the_ledger_is_bounded_and_forgets_the_expired_first() {
         let mut ledger = VerdictLedger::default();
-        ledger.mark("old", NOW - 1, 0, NOW - 10);
+        ledger.mark("old", NOW - 1, 0, "shoulder", NOW - 10);
         for i in 0..LEDGER_CAPACITY {
-            ledger.mark(&format!("n{i}"), NOW + 10_000, 0, NOW);
+            ledger.mark(&format!("n{i}"), NOW + 10_000, 0, "shoulder", NOW);
         }
         assert!(ledger.len() <= LEDGER_CAPACITY);
         assert!(
-            ledger.first_unused("old", &[0]).is_some(),
+            ledger.first_unused("old", "shoulder", &[0]).is_some(),
             "an expired verdict is forgotten, so its point reads as unused"
         );
     }
