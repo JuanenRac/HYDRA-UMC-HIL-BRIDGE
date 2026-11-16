@@ -1288,7 +1288,7 @@ fn handle_route(raw: &str, state: &mut State, context: &RouteContext, info: &Req
     };
     if req.mode == Mode::Real && outcome == RouteOutcome::SentReal {
         if let Some((nonce, valid_until_ms, index)) = &twin_pass_matched {
-            twin_pass_ledger.mark(nonce, *valid_until_ms, *index, now_ms());
+            twin_pass_ledger.mark(nonce, *valid_until_ms, *index, &command.joint, now_ms());
         }
         if let Some(validity) = &validity {
             leases.grant(&command.joint, command.position, validity);
