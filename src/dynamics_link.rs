@@ -127,6 +127,15 @@ pub fn deviations(
     Ok(out)
 }
 
+/// The joints with no recorded sample inside the simulated time: a comparison that compared nothing for a joint says nothing about it.
+pub fn joints_without_comparison(deviations: &[JointDeviation]) -> Vec<&str> {
+    deviations
+        .iter()
+        .filter(|j| j.compared == 0)
+        .map(|j| j.joint.as_str())
+        .collect()
+}
+
 /// Reads a recording: `{"joints": [...], "samples": [{"t_s": 0.0, "positions": [...]}, ...]}`, with the joints in any order; they are put in the order of `joints`.
 pub fn parse_recording(text: &str, joints: &[String]) -> Result<Vec<(f64, Vec<f64>)>, String> {
     let v: serde_json::Value =
@@ -194,6 +203,22 @@ mod tests {
         )
         .is_err());
         assert!(parse_simulated(r#"{"joints":["a"],"samples":[{"t_s":0,"positions":[0,1]},{"t_s":1,"positions":[0,1]}]}"#).is_err());
+    }
+
+    #[test]
+    fn a_recording_outside_the_simulated_time_compares_nothing_and_is_reported() {
+        let sim = parse_simulated(SIM).unwrap();
+        // times in milliseconds instead of seconds from the start: every sample is past the end of the simulation
+        let recorded = vec![(1000.0, vec![0.0, 1.0]), (2000.0, vec![1.0, 1.0])];
+        let result = deviations(&sim, &recorded).unwrap();
+        assert!(result.iter().all(|j| j.compared == 0 && j.max_abs == 0.0));
+        assert_eq!(joints_without_comparison(&result), vec!["a", "b"]);
+        // an empty recording is the same
+        let empty = deviations(&sim, &[]).unwrap();
+        assert_eq!(joints_without_comparison(&empty), vec!["a", "b"]);
+        // a joint that did get compared is not listed
+        let some = deviations(&sim, &[(0.5, vec![0.5, 1.0])]).unwrap();
+        assert!(joints_without_comparison(&some).is_empty());
     }
 
     #[test]

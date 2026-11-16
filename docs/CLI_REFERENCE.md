@@ -221,7 +221,7 @@ on the CM5 (see the systemd unit's own `RestrictAddressFamilies`/
 compare-dynamics --simulator PATH --urdf ROBOT.urdf --recording FILE [--joints "..."] [--velocities "..."] [--torques "..."] [--duration S] [--dt S] [--max-deviation RAD]
 ```
 
-Runs `simulate --json` of HYDRA-UMC-PHYSICS-REPLICA (the program at `--simulator`, with fixed arguments and no shell) and compares its joint positions with a recording of a real arm, by straight lines between the simulated samples. The recording is `{"joints": [...], "samples": [{"t_s": 0.0, "positions": [...]}]}` with the joints in any order. It prints `{"within_limit": ..., "joints": [{"joint", "max_abs", "rms", "compared"}]}`; exit `0` within `--max-deviation` (or when none is given), `1` over it, `2` for bad input. Samples outside the simulated time are not compared. Evidence: simulator until a real arm has been recorded.
+Runs `simulate --json` of HYDRA-UMC-PHYSICS-REPLICA (the program at `--simulator`, with fixed arguments and no shell) and compares its joint positions with a recording of a real arm, by straight lines between the simulated samples. The recording is `{"joints": [...], "samples": [{"t_s": 0.0, "positions": [...]}]}` with the joints in any order. It prints `{"within_limit": ..., "joints": [{"joint", "max_abs", "rms", "compared"}]}`; `within_limit` is `null` when no `--max-deviation` is given (nothing is judged); exit `0` within `--max-deviation` (or when none is given), `1` over it, `2` for bad input, which includes a joint with no recorded sample inside the simulated time (an empty recording, or times in milliseconds or wall-clock time). Samples outside the simulated time are not compared. Evidence: simulator until a real arm has been recorded.
 
 ## Exit codes
 
