@@ -173,17 +173,14 @@ pub fn parse_iso_utc_ms(text: &str) -> Option<u64> {
                 b'-' => -1,
                 _ => return None,
             };
-            let tail = &rest[1..];
+            // `get` (not an index) so that a multi-byte character inside the offset is
+            // refused instead of being cut in half, which would panic
+            let tail = rest.get(1..)?;
+            let part = |from: usize, to: usize| tail.get(from..to)?.parse::<i64>().ok();
             let (h, m) = match tail.len() {
-                5 if tail.as_bytes()[2] == b':' => (
-                    tail[0..2].parse::<i64>().ok()?,
-                    tail[3..5].parse::<i64>().ok()?,
-                ),
-                4 => (
-                    tail[0..2].parse::<i64>().ok()?,
-                    tail[2..4].parse::<i64>().ok()?,
-                ),
-                2 => (tail.parse::<i64>().ok()?, 0),
+                5 if tail.as_bytes()[2] == b':' => (part(0, 2)?, part(3, 5)?),
+                4 => (part(0, 2)?, part(2, 4)?),
+                2 => (part(0, 2)?, 0),
                 _ => return None,
             };
             sign * (h * 60 + m)
@@ -263,6 +260,10 @@ pub(crate) mod tests {
             "2026-01-01T25:00:00Z",
             "2026-01-01T00:00:00.Z",
             "2026-01-01T00:00:00+9",
+            // a multi-byte character inside the offset is refused, never cut in half
+            "2026-01-02T03:04:05+1é2",
+            "2026-01-02T03:04:05+é",
+            "2026-01-02T03:04:05+0é:0",
         ] {
             assert_eq!(parse_iso_utc_ms(bad), None, "{bad}");
         }

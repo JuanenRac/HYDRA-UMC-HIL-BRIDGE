@@ -4,6 +4,8 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+- **A time stamp from the zone monitor with a multi-byte character in its offset is refused instead of stopping a worker thread:** the offset (`+hh:mm`, `+hhmm`, `+hh`) is read with checked slices, so `2026-01-02T03:04:05+1é2` gives no time and the command is refused like any other unreadable stamp; three tests cover it.
+- **`uncertified` counts only the refusals for lack of a valid certificate:** a stale command and a refusal of `twin_pass` were also added to it, so the series showed network delays as forged certificates; they keep their own counters (`staleCommands`, `blockedByTwinPass`) and two tests check that they no longer move `uncertified`.
 - **`compare-dynamics` no longer says "within the limit" for a comparison that compared nothing:** an empty recording, or one whose times do not overlap the simulated time, exits with code 2 and names the joints; without `--max-deviation` the answer carries `within_limit: null` instead of `true`.
 
 
