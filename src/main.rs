@@ -895,7 +895,17 @@ fn run_compare_dynamics(args: &[String]) -> ExitCode {
         }
     };
     eprintln!("note: the simulation is a model (inertial blocks and gravity, no friction, no motor dynamics); evidence = simulator");
-    let within = limit.is_none_or(|l| result.iter().all(|j| j.max_abs <= l));
+    // a comparison that compared nothing says nothing: no joint, or a joint with no recorded sample inside the simulated time, is bad input, never "within the limit"
+    let not_compared = dynamics_link::joints_without_comparison(&result);
+    if result.is_empty() || !not_compared.is_empty() {
+        eprintln!(
+            "compare-dynamics: no recorded sample falls inside the simulated time for: {} (the times of the recording must be in seconds from the start of the simulation)",
+            if result.is_empty() { "any joint".to_string() } else { not_compared.join(", ") }
+        );
+        return ExitCode::from(2);
+    }
+    // without a limit nothing is judged: within_limit is null and the exit is 0 only because nothing was asked
+    let within = limit.map(|l| result.iter().all(|j| j.max_abs <= l));
     let rows: Vec<serde_json::Value> = result
         .iter()
         .map(|j| serde_json::json!({"joint": j.joint, "max_abs": j.max_abs, "rms": j.rms, "compared": j.compared}))
@@ -904,7 +914,7 @@ fn run_compare_dynamics(args: &[String]) -> ExitCode {
         "{}",
         serde_json::json!({"within_limit": within, "joints": rows})
     );
-    if within {
+    if within.unwrap_or(true) {
         ExitCode::SUCCESS
     } else {
         ExitCode::from(1)

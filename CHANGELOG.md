@@ -4,6 +4,8 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+- **`compare-dynamics` no longer says "within the limit" for a comparison that compared nothing:** an empty recording, or one whose times do not overlap the simulated time, exits with code 2 and names the joints; without `--max-deviation` the answer carries `within_limit: null` instead of `true`.
+
 
 ## [0.1.7]
 
