@@ -1242,13 +1242,18 @@ fn handle_route(raw: &str, state: &mut State, context: &RouteContext, info: &Req
                     }
                     _ => None,
                 };
+                // `uncertified` counts only the refusals for lack of a valid certificate: a stale
+                // command and a refusal of `twin_pass` have a counter of their own
+                let mut counted_apart = false;
                 let report = if let Err(reason) =
                     leases.check(&command.joint, validity.as_ref(), now_ms())
                 {
                     stats.stale_commands += 1;
+                    counted_apart = true;
                     Err(reason)
                 } else if let Some(Err(reason)) = twin_pass_check {
                     stats.twin_pass_refused += 1;
+                    counted_apart = true;
                     Err(reason)
                 } else if let Some(certificate) = &req.certificate {
                     verify(
@@ -1272,7 +1277,9 @@ fn handle_route(raw: &str, state: &mut State, context: &RouteContext, info: &Req
                         bridge.route_command(command.clone(), Some(report), real_sink, sim_sink)
                     }
                     Err(reason) => {
-                        stats.uncertified += 1;
+                        if !counted_apart {
+                            stats.uncertified += 1;
+                        }
                         RouteOutcome::BlockedByInterlock { reason }
                     }
                 }
@@ -2974,6 +2981,8 @@ mod tests {
         assert!(resp.contains("BlockedByInterlock"), "{resp}");
         assert!(resp.contains("validity window"), "{resp}");
         assert_eq!(stat(port, "staleCommands"), 1);
+        // a stale command is counted as stale only, not also as uncertified
+        assert_eq!(stat(port, "uncertified"), 0);
         assert_eq!(stat(port, "routedReal"), 0);
     }
 
@@ -4004,6 +4013,8 @@ Content-Length: 500
         let (_, stats) = get_with(port, "/stats", "");
         assert!(stats.contains("\"requireTwinPass\":true"), "{stats}");
         assert!(stats.contains("\"blockedByTwinPass\":1"), "{stats}");
+        // a refusal of `twin_pass` is counted there only, not also as uncertified
+        assert!(stats.contains("\"uncertified\":0"), "{stats}");
     }
 
     #[test]
