@@ -51,14 +51,14 @@ Cada línea es una parte de este repositorio y la luz dice hasta dónde llega ho
 | Área | Estado | Qué significa aquí |
 |---|---|---|
 | Software | 🟡 | Funciona para su propósito principal; la comprobación de honestidad de este README lista lo que aún falta |
-| Pruebas | 🟢 | 266 pruebas automáticas, ejecutadas en cada cambio |
+| Pruebas | 🟡 | 266 pruebas automáticas registradas; aún no se ha confirmado el número exacto ni un flujo de trabajo que las ejecute en cada cambio |
 | Hardware real | 🟠 | Solo simulado: probado con emuladores, dobles de prueba o simuladores; no consta ninguna ejecución en hardware real para esta versión |
-| Integración | 🟠 | Funciona junto con los demás servicios en el banco de pruebas de la CM5 y sus mensajes siguen los contratos compartidos del SDK |
+| Integración | 🟠 | Sus mensajes y rutas se comprueban contra los contratos compartidos del SDK; no ha funcionado junto con el equipo real |
 | Seguridad | 🟠 | Existen algunas protecciones (un token, límites a lo que acepta) pero no todas están cubiertas por pruebas; nadie ajeno al proyecto las ha revisado |
 | Despliegue | 🟡 | Instalado como servicio en el banco de pruebas de la CM5 con su instalador y su unidad; se reinicia en cada actualización |
 | Operación | 🟡 | Expone /metrics en el formato de texto de Prometheus con un resumen de salud; todavía no está conectado a un panel de supervisión |
 | Actualizaciones | 🟡 | Se actualiza con HYDRA-UMC-UPDATER (trenes firmados, copias de seguridad y reversión probadas en un ordenador) |
-| Parada y seguridad | 🟠 | El camino de parada y sus límites están implementados y probados con simuladores; nunca han funcionado en una máquina real, y esto no es un sistema de seguridad certificado |
+| Parada y seguridad | 🔴 | La orden de parada existe, pero todavía nada la conecta con el equipo ni con su fuente de estado; la parada debe venir de otra parte del sistema |
 | Documentación | 🟢 | README en ocho idiomas, comprobado contra el manifiesto en cada cambio |
 
 ## 🎯 Resumen

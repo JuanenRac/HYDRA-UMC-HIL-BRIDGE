@@ -51,14 +51,14 @@ Chaque ligne est une partie de ce dépôt et le feu dit où elle en est aujourd'
 | Domaine | État | Ce que cela veut dire ici |
 |---|---|---|
 | Logiciel | 🟡 | Fonctionne pour son usage principal ; la vérification d'honnêteté de ce README liste ce qui manque encore |
-| Tests | 🟢 | 266 tests automatiques, exécutés à chaque modification |
+| Tests | 🟡 | 266 tests automatiques consignés ; le nombre exact, ou un workflow qui les exécute à chaque modification, n'est pas encore confirmé |
 | Matériel réel | 🟠 | Simulé seulement : testé avec des émulateurs, des doubles de test ou des simulateurs ; aucune exécution sur du matériel réel n'est consignée pour cette version |
-| Intégration | 🟠 | Il fonctionne avec les autres services sur le banc d'essai CM5 et ses messages suivent les contrats partagés du SDK |
+| Intégration | 🟠 | Ses messages et ses routes sont vérifiés par rapport aux contrats partagés du SDK ; il n'a pas fonctionné avec l'équipement réel |
 | Sécurité | 🟠 | Quelques protections existent (un jeton, des limites sur ce qu'il accepte) mais elles ne sont pas toutes couvertes par des tests ; personne hors du projet ne les a relues |
 | Déploiement | 🟡 | Installé comme service sur le banc d'essai CM5 avec son installeur et son unité ; redémarré à chaque mise à jour |
 | Exploitation | 🟡 | Expose /metrics au format texte de Prometheus avec un résumé de santé ; pas encore relié à un tableau de supervision |
 | Mises à jour | 🟡 | Mis à jour par HYDRA-UMC-UPDATER (trains signés, sauvegardes et retour arrière testés sur un ordinateur) |
-| Arrêt et sécurité | 🟠 | Le chemin d'arrêt et ses limites sont implémentés et testés avec des simulateurs ; ils n'ont jamais fonctionné sur une vraie machine, et ce n'est pas un système de sécurité certifié |
+| Arrêt et sécurité | 🔴 | La commande d'arrêt existe, mais rien ne la relie encore à l'équipement ni à sa source d'état ; l'arrêt doit venir d'une autre partie du système |
 | Documentation | 🟢 | README en huit langues, vérifié par rapport au manifeste à chaque modification |
 
 ## 🎯 Présentation
