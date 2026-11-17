@@ -51,14 +51,14 @@ Ogni riga è una parte di questo repository e il semaforo dice a che punto è og
 | Area | Stato | Cosa significa qui |
 |---|---|---|
 | Software | 🟡 | Funziona per il suo scopo principale; la verifica di onestà di questo README elenca ciò che manca ancora |
-| Test | 🟢 | 266 test automatici, eseguiti a ogni modifica |
+| Test | 🟡 | 266 test automatici registrati; il numero esatto, o un workflow che li esegue a ogni modifica, non è ancora confermato |
 | Hardware reale | 🟠 | Solo simulato: provato con emulatori, test double o simulatori; per questa versione non risulta alcuna esecuzione su hardware reale |
-| Integrazione | 🟠 | Funziona insieme agli altri servizi sul banco prova CM5 e i suoi messaggi seguono i contratti condivisi dell'SDK |
+| Integrazione | 🟠 | I suoi messaggi e le sue rotte sono verificati rispetto ai contratti condivisi dell'SDK; non ha ancora funzionato insieme all'apparecchiatura reale |
 | Sicurezza | 🟠 | Esistono alcune protezioni (un token, limiti su ciò che accetta) ma non sono tutte coperte da test; nessuno al di fuori del progetto le ha riviste |
 | Distribuzione | 🟡 | Installato come servizio sul banco prova CM5 con il suo installatore e la sua unità; riavviato a ogni aggiornamento |
 | Esercizio | 🟡 | Espone /metrics nel formato testo di Prometheus con un riepilogo dello stato; non è ancora collegato a un pannello di monitoraggio |
 | Aggiornamenti | 🟡 | Si aggiorna con HYDRA-UMC-UPDATER (treni firmati, copie di sicurezza e ripristino provati su un computer) |
-| Arresto e sicurezza | 🟠 | Il percorso di arresto e i suoi limiti sono implementati e provati con simulatori; non hanno mai funzionato su una macchina reale e questo non è un sistema di sicurezza certificato |
+| Arresto e sicurezza | 🔴 | Il comando di arresto esiste, ma nulla lo collega ancora all'apparecchiatura o alla sua fonte di stato; l'arresto deve arrivare da un'altra parte del sistema |
 | Documentazione | 🟢 | README in otto lingue, verificato rispetto al manifesto a ogni modifica |
 
 ## 🎯 Panoramica
