@@ -187,7 +187,7 @@ Die CI führt `HYDRA_UMC_CI=1 python tools/ci_validate.py` aus; das prüft das M
 
 ## 🏗️ Build und Veröffentlichung
 
-Erfordert die Rust-Toolchain (`cargo`/`rustc`, Installation via [rustup](https://rustup.rs)) und Python 3.10+ (nur für `bump_version.py`).
+Erfordert die Rust-Toolchain (`cargo`/`rustc`, Installation via [rustup](https://rustup.rs)) und Python 3.10+ (für `bump_version.py` und `tools/ci_validate.py`).
 
 ```bash
 # Linux / macOS

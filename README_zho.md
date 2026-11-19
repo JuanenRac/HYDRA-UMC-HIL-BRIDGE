@@ -188,7 +188,7 @@ CI 运行 `HYDRA_UMC_CI=1 python tools/ci_validate.py`，检查清单、文档�
 ## 🏗️ 构建与发布
 
 需要 Rust 工具链（`cargo`/`rustc`，通过 [rustup](https://rustup.rs) 安装）
-以及 Python 3.10+（仅供 `bump_version.py` 使用）。
+以及 Python 3.10+（供 `bump_version.py` 和 `tools/ci_validate.py` 使用）。
 
 ```bash
 # Linux / macOS

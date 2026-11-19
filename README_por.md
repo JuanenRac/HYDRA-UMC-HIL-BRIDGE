@@ -182,7 +182,7 @@ A CI executa `HYDRA_UMC_CI=1 python tools/ci_validate.py`, que verifica o manife
 
 ## 🏗️ Compilação e publicação
 
-Requer a cadeia de ferramentas Rust (`cargo`/`rustc`, instale com o [rustup](https://rustup.rs)) e Python 3.10+ (só para o `bump_version.py`).
+Requer a cadeia de ferramentas Rust (`cargo`/`rustc`, instale com o [rustup](https://rustup.rs)) e Python 3.10+ (para o `bump_version.py` e o `tools/ci_validate.py`).
 
 ```bash
 # Linux / macOS
