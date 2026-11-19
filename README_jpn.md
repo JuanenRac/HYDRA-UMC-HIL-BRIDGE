@@ -190,7 +190,7 @@ CI は `HYDRA_UMC_CI=1 python tools/ci_validate.py` を実行し、マニフェ�
 ## 🏗️ ビルドとリリース
 
 Rust ツールチェーン（`cargo`/`rustc`、[rustup](https://rustup.rs) 経由で
-インストール）と Python 3.10+（`bump_version.py` のみに使用）が必要です。
+インストール）と Python 3.10+（`bump_version.py` と `tools/ci_validate.py` に使用）が必要です。
 
 ```bash
 # Linux / macOS

@@ -186,7 +186,7 @@ The CI runs `HYDRA_UMC_CI=1 python tools/ci_validate.py`, which checks the manif
 
 ## 🏗️ Build & Release
 
-Requires the Rust toolchain (`cargo`/`rustc`, install via [rustup](https://rustup.rs)) and Python 3.10+ (only for `bump_version.py`).
+Requires the Rust toolchain (`cargo`/`rustc`, install via [rustup](https://rustup.rs)) and Python 3.10+ (for `bump_version.py` and `tools/ci_validate.py`).
 
 ```bash
 # Linux / macOS

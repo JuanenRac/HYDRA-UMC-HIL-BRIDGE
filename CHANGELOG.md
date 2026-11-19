@@ -4,6 +4,7 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+- **The build notes say that `tools/ci_validate.py` also needs Python 3.10 or newer:** the requirement was only given for the tests, so a checkout with an older interpreter failed the validation with no hint why. The eight README files carry the same line.
 - **With the twin-pass switch on, a trajectory of several joints can be run:** the points already sent were remembered by sample only, so sending the elbow of a sample used up the shoulder of the same sample and the command for it was refused as already sent. They are now remembered per sample and joint: every joint of every sample is still good for one command, and a verdict is not used up by a command for another joint. Test added in the module that holds the ledger.
 - **A time stamp from the zone monitor with a multi-byte character in its offset is refused instead of stopping a worker thread:** the offset (`+hh:mm`, `+hhmm`, `+hh`) is read with checked slices, so `2026-01-02T03:04:05+1é2` gives no time and the command is refused like any other unreadable stamp; three tests cover it.
 - **`uncertified` counts only the refusals for lack of a valid certificate:** a stale command and a refusal of `twin_pass` were also added to it, so the series showed network delays as forged certificates; they keep their own counters (`staleCommands`, `blockedByTwinPass`) and two tests check that they no longer move `uncertified`.
