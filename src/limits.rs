@@ -262,7 +262,7 @@ mod tests {
     }
 }
 
-/// The questionable files both readers of limits are tested on (`tests/urdf_invalid/`, the same bytes in HYDRA-UMC-PHYSICS-REPLICA):
+/// The questionable files both readers of limits are tested on (`src/urdf_invalid/`, the same bytes as `tests/urdf_invalid/` of HYDRA-UMC-PHYSICS-REPLICA):
 /// `expect.json` says what each of the two does with each file, so a difference between them is written down.
 #[cfg(test)]
 mod shared_cases {
@@ -274,7 +274,7 @@ mod shared_cases {
     const FINGERPRINT: u64 = 0x3792_93c2_746a_6dd7;
 
     fn folder() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/urdf_invalid")
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/urdf_invalid")
     }
 
     #[test]

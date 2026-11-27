@@ -7,4 +7,4 @@
 *.cmd text eol=crlf
 
 # The questionable URDF files both readers of limits are tested on, byte for byte.
-tests/urdf_invalid/** -text
+src/urdf_invalid/** -text
