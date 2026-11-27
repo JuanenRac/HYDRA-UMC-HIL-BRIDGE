@@ -1,0 +1,108 @@
+{
+  "cases": [
+    {
+      "file": "no_limit.urdf",
+      "why": "a revolute joint without <limit>: the replica reads it and says the position was not checked, the bridge refuses the file",
+      "replica": {
+        "limits": {
+          "j": null,
+          "k": null
+        }
+      },
+      "bridge": {
+        "error": true
+      }
+    },
+    {
+      "file": "no_lower.urdf",
+      "why": "no lower bound: the replica takes the default 0 of URDF, the bridge wants both bounds written",
+      "replica": {
+        "limits": {
+          "j": [
+            0,
+            1
+          ],
+          "k": null
+        }
+      },
+      "bridge": {
+        "error": true
+      }
+    },
+    {
+      "file": "wrong_root.urdf",
+      "why": "the root element is not <robot>",
+      "replica": {
+        "error": true
+      },
+      "bridge": {
+        "error": true
+      }
+    },
+    {
+      "file": "mimic.urdf",
+      "why": "a joint that follows another: the replica keeps its range, the bridge does not let it be commanded",
+      "replica": {
+        "limits": {
+          "j": [
+            -1,
+            1
+          ],
+          "k": [
+            -1,
+            1
+          ]
+        }
+      },
+      "bridge": {
+        "limits": {
+          "j": [
+            -1,
+            1
+          ],
+          "k": "fixed"
+        }
+      }
+    },
+    {
+      "file": "unsupported_type.urdf",
+      "why": "a joint type neither reader moves",
+      "replica": {
+        "error": true
+      },
+      "bridge": {
+        "error": true
+      }
+    },
+    {
+      "file": "nan_limit.urdf",
+      "why": "a bound that is not a number",
+      "replica": {
+        "error": true
+      },
+      "bridge": {
+        "error": true
+      }
+    },
+    {
+      "file": "inverted_limit.urdf",
+      "why": "the lower bound is above the upper one",
+      "replica": {
+        "error": true
+      },
+      "bridge": {
+        "error": true
+      }
+    },
+    {
+      "file": "duplicate_joint.urdf",
+      "why": "two joints with one name",
+      "replica": {
+        "error": true
+      },
+      "bridge": {
+        "error": true
+      }
+    }
+  ]
+}
