@@ -1697,6 +1697,7 @@ fn shadow_collision(
         kind: Some(outcome.kind()),
         delivered: None,
         reason,
+        sink: None,
     };
     if let Err(e) = state.audit.record(entry) {
         state.stats.audit_failures += 1;
@@ -1786,6 +1787,7 @@ fn shadow_precheck(
         kind: Some(kind),
         delivered: refusal.is_some().then_some(false),
         reason: Some(reason),
+        sink: None,
     };
     if let Err(e) = state.audit.record(entry) {
         state.stats.audit_failures += 1;
@@ -1890,6 +1892,7 @@ fn zones_precheck(
         kind: Some(kind),
         delivered: refusal.is_some().then_some(false),
         reason: Some(reason),
+        sink: None,
     };
     if let Err(e) = state.audit.record(entry) {
         state.stats.audit_failures += 1;
