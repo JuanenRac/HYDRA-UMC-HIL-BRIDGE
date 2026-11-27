@@ -5,3 +5,6 @@
 *.sh text eol=lf
 *.bat text eol=crlf
 *.cmd text eol=crlf
+
+# The questionable URDF files both readers of limits are tested on, byte for byte.
+src/urdf_invalid/** -text

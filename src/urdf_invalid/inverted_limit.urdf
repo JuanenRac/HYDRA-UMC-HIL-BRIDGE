@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<robot name="probe">
+  <link name="base"/>
+  <link name="a"/>
+  <link name="b"/>
+  <joint name="j" type="revolute">
+    <parent link="base"/>
+    <child link="a"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="1" upper="-1" effort="1" velocity="1"/>
+  </joint>
+  <joint name="k" type="fixed">
+    <parent link="a"/>
+    <child link="b"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+</robot>

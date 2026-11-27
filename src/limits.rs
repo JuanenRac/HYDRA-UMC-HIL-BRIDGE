@@ -261,3 +261,69 @@ mod tests {
         assert!(JointLimits::from_urdf(r#"<robot><joint name="a"/></robot>"#).is_err());
     }
 }
+
+/// The questionable files both readers of limits are tested on (`src/urdf_invalid/`, the same bytes as `tests/urdf_invalid/` of HYDRA-UMC-PHYSICS-REPLICA):
+/// `expect.json` says what each of the two does with each file, so a difference between them is written down.
+#[cfg(test)]
+mod shared_cases {
+    use super::*;
+    use serde_json::{json, Value};
+    use std::path::PathBuf;
+
+    /// FNV-1a of the names and bytes of the set. The other repository asserts the same number: change a case in both.
+    const FINGERPRINT: u64 = 0x3792_93c2_746a_6dd7;
+
+    fn folder() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/urdf_invalid")
+    }
+
+    #[test]
+    fn the_shared_files_are_the_agreed_ones() {
+        let mut names: Vec<String> = std::fs::read_dir(folder())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        let mut digest = 0xCBF2_9CE4_8422_2325u64;
+        for name in &names {
+            let bytes = std::fs::read(folder().join(name)).unwrap();
+            for byte in name.bytes().chain(bytes) {
+                digest = (digest ^ u64::from(byte)).wrapping_mul(0x100_0000_01B3);
+            }
+        }
+        assert_eq!(digest, FINGERPRINT, "{names:?}");
+    }
+
+    #[test]
+    fn every_shared_file_is_read_as_the_table_says() {
+        let text = std::fs::read_to_string(folder().join("expect.json")).unwrap();
+        let table: Value = serde_json::from_str(&text).unwrap();
+        let cases = table["cases"].as_array().unwrap();
+        assert!(cases.len() >= 8);
+        for case in cases {
+            let file = case["file"].as_str().unwrap();
+            let xml = std::fs::read_to_string(folder().join(file)).unwrap();
+            let expected = &case["bridge"];
+            match JointLimits::from_urdf(&xml) {
+                Err(e) => assert_eq!(expected, &json!({"error": true}), "{file}: {e}"),
+                Ok(read) => {
+                    let limits = expected["limits"].as_object().unwrap_or_else(|| {
+                        panic!("{file} was read but the table says it is refused")
+                    });
+                    assert_eq!(read.joints.len(), limits.len(), "{file}");
+                    for (name, range) in &read.joints {
+                        let wanted = match &limits[name] {
+                            Value::String(kind) if kind == "fixed" => JointRange::Fixed,
+                            Value::String(_) => JointRange::Unbounded,
+                            bounds => JointRange::Bounded {
+                                lower: bounds[0].as_f64().unwrap(),
+                                upper: bounds[1].as_f64().unwrap(),
+                            },
+                        };
+                        assert_eq!(range, &wanted, "{file}: {name}");
+                    }
+                }
+            }
+        }
+    }
+}
