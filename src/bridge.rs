@@ -52,6 +52,11 @@ impl fmt::Display for TransportError {
 pub trait CommandSink {
     fn send(&mut self, command: &JointCommand) -> Result<(), TransportError>;
 
+    /// What is on the other side, as the answer and the audit name it. No sink of this bridge reaches a real robot yet.
+    fn name(&self) -> &'static str {
+        "recording"
+    }
+
     /// Stops a joint: asked by the watchdog when the lease of the last command ran out. A sink that cannot stop reports it, because a
     /// stop that did not happen must not be taken for one that did.
     fn stop(&mut self, _joint: &str) -> Result<(), TransportError> {
@@ -176,6 +181,10 @@ impl SimulatedTransport {
 }
 
 impl CommandSink for SimulatedTransport {
+    fn name(&self) -> &'static str {
+        "simulated_transport"
+    }
+
     fn send(&mut self, command: &JointCommand) -> Result<(), TransportError> {
         if !self.connected {
             return Err(TransportError::Disconnected);

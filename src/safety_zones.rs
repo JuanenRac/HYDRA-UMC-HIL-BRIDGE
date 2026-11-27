@@ -151,7 +151,7 @@ pub fn parse_iso_utc_ms(text: &str) -> Option<u64> {
     {
         return None;
     }
-    let mut rest = &text[19..];
+    let mut rest = text.get(19..)?;
     let mut millis = 0i64;
     if let Some(fraction) = rest.strip_prefix('.') {
         let digits: String = fraction
