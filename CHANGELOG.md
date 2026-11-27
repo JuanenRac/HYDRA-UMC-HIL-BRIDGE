@@ -4,6 +4,9 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+- **A verdict of the twin can be registered once and named by each command:** `POST /twin-pass/register` takes the verdict with all the samples of its trajectory (up to 4 MiB; a command is limited to 16 KiB, so a long trajectory could never travel inside one), checks it as for a command and keeps at most eight; a command then carries `twin_pass_ref` with the nonce. `twin_pass` inside the command works as before.
+- **The points of a passed trajectory can be required in order:** `--twin-pass-ordered` (or `HYDRA_UMC_HIL_BRIDGE_TWIN_PASS_ORDERED=1`) refuses a point of a joint that is not the next one of the verdict. Off by default.
+
 ## [0.1.8]
 
 - **The build notes say that `tools/ci_validate.py` also needs Python 3.10 or newer:** the requirement was only given for the tests, so a checkout with an older interpreter failed the validation with no hint why. The eight README files carry the same line.

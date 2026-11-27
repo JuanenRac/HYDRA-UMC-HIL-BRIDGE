@@ -49,6 +49,10 @@ fn header(name: &str, value: &str) -> tiny_http::Header {
 /// The largest request body this surface reads. Every request here is a few hundred bytes of JSON; reading without a limit let anything that could reach the port make the process
 /// allocate as much memory as it was sent.
 const MAX_BODY_BYTES: u64 = 16 * 1024;
+/// The body of `POST /twin-pass/register`: a verdict with all the samples of its trajectory does not fit in a command.
+const MAX_REGISTER_BODY_BYTES: u64 = 4 * 1024 * 1024;
+/// Verdicts kept registered at once (an expired one goes first, then the oldest).
+const MAX_REGISTERED_VERDICTS: usize = 8;
 
 /// Why a request body could not be used, so each cause gets its own status.
 enum BodyError {
@@ -57,16 +61,16 @@ enum BodyError {
     Io(std::io::Error),
 }
 
-fn read_body(request: &mut tiny_http::Request) -> Result<String, BodyError> {
+fn read_body(request: &mut tiny_http::Request, limit: u64) -> Result<String, BodyError> {
     use std::io::Read;
     // one byte more than the limit, so "exactly the limit" is accepted and "over" is detected
     let mut raw = Vec::new();
     request
         .as_reader()
-        .take(MAX_BODY_BYTES + 1)
+        .take(limit + 1)
         .read_to_end(&mut raw)
         .map_err(BodyError::Io)?;
-    if raw.len() as u64 > MAX_BODY_BYTES {
+    if raw.len() as u64 > limit {
         return Err(BodyError::TooLarge);
     }
     String::from_utf8(raw).map_err(|_| BodyError::NotUtf8)
@@ -118,6 +122,8 @@ struct RouteRequest {
     /// The pass verdict of the twin for the trajectory this command belongs to, with the samples it was made for (see `twin_pass.rs`). Read only
     /// when the switch `require_twin_pass` is on.
     twin_pass: Option<TwinPassProof>,
+    /// The nonce of a verdict registered before with `POST /twin-pass/register`, instead of `twin_pass`.
+    twin_pass_ref: Option<String>,
     #[serde(default)]
     transport: TransportConfig,
     /// The validity window of the command (see `watchdog.rs`): when it was issued, how long it is good for, and its sequence number.
@@ -218,6 +224,8 @@ pub struct TwinPassConfig {
     pub file: Option<std::path::PathBuf>,
     /// `--twin-robot-id`: the robot a verdict must be for. Without it the switch cannot be turned on.
     pub robot_id: String,
+    /// `--twin-pass-ordered`: the points of a trajectory are accepted only in its order, joint by joint. Off by default.
+    pub ordered: bool,
 }
 
 /// Everything `run_with_config` needs besides the socket.
@@ -352,6 +360,8 @@ struct State {
     /// The switch `require_twin_pass` as it is now, and the points of the trajectories already sent under each verdict.
     twin_pass_required: bool,
     twin_pass_ledger: VerdictLedger,
+    /// The verdicts registered with their samples, oldest first.
+    twin_pass_registry: Vec<TwinPassProof>,
 }
 
 struct Shared {
@@ -416,6 +426,7 @@ pub fn run_with_config(server: Server, config: ServerConfig) {
         pending_twin: None,
         twin_pass_required: config.twin_pass.required,
         twin_pass_ledger: VerdictLedger::default(),
+        twin_pass_registry: Vec::new(),
     };
     let shared = Arc::new(Shared {
         config,
@@ -838,6 +849,7 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
                 | "/stats"
                 | "/audit"
                 | "/settings/twin-pass"
+                | "/twin-pass/register"
         ) {
             Reply::json(405, json!({"error": "method not allowed"}))
                 .with(
@@ -864,14 +876,19 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
     }
 
     // Reading the body can take as long as the client wants: it is done before the lock is taken.
-    let raw = match read_body(&mut request) {
+    let body_limit = if path == "/twin-pass/register" {
+        MAX_REGISTER_BODY_BYTES
+    } else {
+        MAX_BODY_BYTES
+    };
+    let raw = match read_body(&mut request, body_limit) {
         Ok(raw) => raw,
         Err(e) => {
             shared.lock().stats.malformed_requests += 1;
             let (status, message) = match e {
                 BodyError::TooLarge => (
                     413,
-                    format!("request body is larger than {MAX_BODY_BYTES} bytes"),
+                    format!("request body is larger than {body_limit} bytes"),
                 ),
                 BodyError::NotUtf8 => (400, "request body is not valid UTF-8".to_string()),
                 BodyError::Io(e) => (400, format!("could not read request body: {e}")),
@@ -927,6 +944,7 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
                             sim_robot: config.sim_robot.as_deref(),
                             recorder: config.recorder.as_deref(),
                             twin_pass_robot_id: &config.twin_pass.robot_id,
+                            twin_pass_ordered: config.twin_pass.ordered,
                             require_identity_for_real: config.require_identity_for_real,
                         },
                         &info,
@@ -954,6 +972,7 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
                 }
             }
             "/measured" => handle_measured(&raw, shared, &info),
+            "/twin-pass/register" => handle_twin_pass_register(&raw, shared, &info),
             "/settings/twin-pass" => handle_twin_pass_settings(
                 &Method::Post,
                 &raw,
@@ -987,6 +1006,55 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
         }
     }
     reply.send(request);
+}
+
+/// `POST /twin-pass/register`: keep a verdict of the twin with its samples, so that each command only names its nonce. The verdict is checked
+/// here as it is for a command, and again for each command that names it.
+fn handle_twin_pass_register(raw: &str, shared: &Shared, info: &RequestInfo) -> Reply {
+    let config = &shared.config;
+    if config.require_identity_for_real && !info.authenticated {
+        shared.lock().stats.unauthorized += 1;
+        return Reply::json(
+            401,
+            json!({"error": "registering a verdict needs the Bearer token or a valid identity of HYDRA-UMC-SERVER"}),
+        )
+        .with("WWW-Authenticate", "Bearer");
+    }
+    let proof: TwinPassProof = match serde_json::from_str(raw) {
+        Ok(proof) => proof,
+        Err(e) => {
+            shared.lock().stats.malformed_requests += 1;
+            return Reply::json(
+                400,
+                json!({"error": format!("malformed request JSON: {e}")}),
+            );
+        }
+    };
+    let now = now_ms();
+    if let Err(reason) = crate::twin_pass::check_proof(
+        &proof,
+        &config.interlock.trusted_keys,
+        &config.twin_pass.robot_id,
+        now,
+    ) {
+        shared.lock().stats.twin_pass_refused += 1;
+        return Reply::json(422, json!({"registered": false, "error": reason}));
+    }
+    let body = json!({
+        "registered": true,
+        "nonce": proof.verdict.nonce,
+        "samples": proof.samples.len(),
+        "valid_until_ms": proof.verdict.valid_until_ms,
+    });
+    let mut state = shared.lock();
+    state
+        .twin_pass_registry
+        .retain(|p| p.verdict.valid_until_ms >= now && p.verdict.nonce != proof.verdict.nonce);
+    while state.twin_pass_registry.len() >= MAX_REGISTERED_VERDICTS {
+        state.twin_pass_registry.remove(0);
+    }
+    state.twin_pass_registry.push(proof);
+    Reply::json(200, body)
 }
 
 /// Whether a `/route` body asks for the real mode (anything that cannot be read counts as the simulation: it never reaches the hardware).
@@ -1071,6 +1139,8 @@ struct RouteContext<'a> {
     recorder: Option<&'a Recorder>,
     /// The robot a pass verdict of the twin must be for (`--twin-robot-id`).
     twin_pass_robot_id: &'a str,
+    /// `--twin-pass-ordered`.
+    twin_pass_ordered: bool,
     /// A real order needs an authenticated request (see `ServerConfig::require_identity_for_real`).
     require_identity_for_real: bool,
 }
@@ -1113,6 +1183,7 @@ fn handle_route(raw: &str, state: &mut State, context: &RouteContext, info: &Req
         pending_twin,
         twin_pass_required,
         twin_pass_ledger,
+        twin_pass_registry,
         ..
     } = state;
     let fault_injection = context.fault_injection;
@@ -1225,14 +1296,32 @@ fn handle_route(raw: &str, state: &mut State, context: &RouteContext, info: &Req
                 // With the switch on, the trajectory of the command must have a pass verdict of the twin. It is looked at before the certificate, so a
                 // command without it does not use up the certificate it carries; the point of the trajectory is marked only when the command went.
                 let twin_pass_check = if *twin_pass_required {
-                    Some(crate::twin_pass::check(
-                        req.twin_pass.as_ref(),
-                        &command,
-                        &context.interlock.trusted_keys,
-                        context.twin_pass_robot_id,
-                        now_ms(),
-                        twin_pass_ledger,
-                    ))
+                    // the samples come with the command, or the command names a registered verdict
+                    let proof = req.twin_pass.as_ref().or_else(|| {
+                        let nonce = req.twin_pass_ref.as_deref()?;
+                        twin_pass_registry.iter().find(|p| p.verdict.nonce == nonce)
+                    });
+                    let checked = match (&proof, &req.twin_pass_ref) {
+                        (None, Some(_)) => Err("no verdict with that nonce is registered on this bridge (POST /twin-pass/register)".to_string()),
+                        _ => crate::twin_pass::check(
+                            proof,
+                            &command,
+                            &context.interlock.trusted_keys,
+                            context.twin_pass_robot_id,
+                            now_ms(),
+                            twin_pass_ledger,
+                        ),
+                    };
+                    Some(checked.and_then(|matched| {
+                        let next = proof.and_then(|p| {
+                            twin_pass_ledger.next_unsent(&matched.nonce, &command.joint, &p.samples)
+                        });
+                        if context.twin_pass_ordered && next != Some(matched.index) {
+                            Err("the points of a passed trajectory are accepted only in its order (--twin-pass-ordered)".to_string())
+                        } else {
+                            Ok(matched)
+                        }
+                    }))
                 } else {
                     None
                 };
@@ -3983,6 +4072,35 @@ Content-Length: 500
     }
 
     #[test]
+    fn a_verdict_that_does_not_check_is_not_registered_and_an_unknown_nonce_blocks_the_command() {
+        let port = start_with(twin_pass_config(true));
+        let (status, resp) = post_with(port, "/twin-pass/register", "", "{}");
+        assert_eq!(status, 400, "{resp}");
+        let (status, resp) = post_with(
+            port,
+            "/twin-pass/register",
+            "",
+            r#"{"verdict":{"verdict":"pass","robot_id":"arm-1","trajectory_sha256":"00","issued_at_ms":1,"valid_until_ms":2,"nonce":"00","key_id":"00","signature":"00"},"samples":[{"t":0.0,"joints":{"shoulder":0.0}}]}"#,
+        );
+        assert_eq!(status, 422, "{resp}");
+    }
+
+    #[test]
+    fn the_next_unsent_point_follows_the_trajectory() {
+        let mut ledger = VerdictLedger::default();
+        let samples: Vec<crate::twin_pass::Sample> = serde_json::from_str(
+            r#"[{"t":0.0,"joints":{"a":0.0}},{"t":0.1,"joints":{"b":1.0}},{"t":0.2,"joints":{"a":0.5}}]"#,
+        )
+        .unwrap();
+        assert_eq!(ledger.next_unsent("n", "a", &samples), Some(0));
+        ledger.mark("n", u64::MAX, 0, "a", 0);
+        assert_eq!(ledger.next_unsent("n", "a", &samples), Some(2));
+        ledger.mark("n", u64::MAX, 2, "a", 0);
+        assert_eq!(ledger.next_unsent("n", "a", &samples), None);
+        assert_eq!(ledger.next_unsent("n", "b", &samples), Some(1));
+    }
+
+    #[test]
     fn with_the_switch_off_a_real_command_does_not_need_a_verdict() {
         let port = start_with(twin_pass_config(false));
         let (status, resp) = post_with(
@@ -4104,6 +4222,7 @@ Content-Length: 500
                 locked,
                 robot_id: robot_id.to_string(),
                 file,
+                ordered: false,
             },
             ..certified_config()
         }

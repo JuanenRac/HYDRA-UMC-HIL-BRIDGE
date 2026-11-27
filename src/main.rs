@@ -277,6 +277,10 @@ fn load_twin_pass(
         }
         config.file = Some(path);
     }
+    config.ordered = has_flag(args, "--twin-pass-ordered")
+        || env::var("HYDRA_UMC_HIL_BRIDGE_TWIN_PASS_ORDERED")
+            .map(|v| v == "1")
+            .unwrap_or(false);
     if has_flag(args, "--require-twin-pass")
         || env::var("HYDRA_UMC_HIL_BRIDGE_REQUIRE_TWIN_PASS")
             .map(|v| v == "1")

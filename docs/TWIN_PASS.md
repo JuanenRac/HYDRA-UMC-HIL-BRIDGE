@@ -42,6 +42,7 @@ blocked order.
 | `--require-twin-pass` | `HYDRA_UMC_HIL_BRIDGE_REQUIRE_TWIN_PASS=1` | Turns the verdict on at start and **locks it**: it cannot be turned off while the bridge runs. Needs the key and the robot. |
 | `--twin-robot-id NAME` | `HYDRA_UMC_HIL_BRIDGE_TWIN_ROBOT_ID` | The robot a verdict must be for. |
 | `--twin-pass-file FILE` | | Where the value is kept (`{"require_twin_pass": true}`), read at start and written by a change from HYDRA-UMC-SERVER. |
+| `--twin-pass-ordered` | `HYDRA_UMC_HIL_BRIDGE_TWIN_PASS_ORDERED=1` | A point of a joint that is not the next one of the verdict is refused. Off by default. |
 
 `GET /settings/twin-pass` answers `requireTwinPass`, `locked`, `persisted`, `ready` (key and robot set), `robotIdSet`, `keysConfigured` and `canChange`.
 `POST /settings/twin-pass` with `{"requireTwinPass": true|false, "confirm": true}` changes it. Only an administrator of HYDRA-UMC-SERVER can do it (a signed token with
@@ -51,3 +52,7 @@ carries the change from STUDIO and SUITE (`GET` and `POST /api/hil-bridge/settin
 `blockedByTwinPass`.
 
 This is a simulation with finite differences: it does not replace the limits of the controller or the stop of the firmware.
+
+## Registering a verdict once
+
+A command body is limited to 16 KiB, so a long trajectory does not fit in it. `POST /twin-pass/register` takes `{"verdict": ..., "samples": [...]}` (up to 4 MiB), checks the signature, the samples, the robot and the window, and keeps at most eight verdicts. A command then carries `"twin_pass_ref": "<nonce of the verdict>"` instead of `twin_pass`. The verdict is checked again for every command, and each point is still good for one command. The registry lives in memory: after a restart, register again.
