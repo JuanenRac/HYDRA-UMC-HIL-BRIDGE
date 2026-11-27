@@ -176,6 +176,8 @@ struct Stats {
     watchdog_stop_failures: u64,
     twin_reports: u64,
     twin_report_failures: u64,
+    /// Requests that ended in a panic (see `answer_isolated`).
+    worker_panics: u64,
     /// Whether the last report to the twin arrived (None: none was tried yet or no twin is configured).
     twin_in_sync: Option<bool>,
     /// The collision prediction asked of the twin in shadow (see `collision_shadow.rs`): answered, with a contact predicted, and failed.
@@ -463,7 +465,16 @@ fn worker_loop(server: &Server, shared: &Shared) {
             Ok(None) => continue,
             Err(_) => break,
         };
-        handle_request(request, shared);
+        answer_isolated(shared, || handle_request(request, shared));
+    }
+}
+
+/// Runs one request so that a panic in it costs that request only: the worker, which also runs the watchdog, goes on, and the panic
+/// is counted (`workerPanics`). The lock tolerates poisoning (`Shared::lock`).
+fn answer_isolated(shared: &Shared, request: impl FnOnce()) {
+    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(request)).is_err() {
+        shared.lock().stats.worker_panics += 1;
+        eprintln!("[hil-bridge] a request ended in a panic; the worker goes on");
     }
 }
 
@@ -471,6 +482,12 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
     let config = &shared.config;
     let path = request.url().split('?').next().unwrap_or("").to_string();
     let mut authenticated = false;
+    #[cfg(test)]
+    if path == "/panic-in-a-test" {
+        // the state is held when it panics, the worst case: the lock is left poisoned
+        let _state = shared.lock();
+        panic!("a test asked for a panic");
+    }
 
     if path == "/health" && request.method() == &Method::Get {
         // before the token gate: the route is closed unless the operator opened it, and then it names the service and its version only
@@ -599,6 +616,7 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
                 "replayFailures": stats.replay_failures,
                 "urdfLimits": config.limits.as_ref().map(|l| l.len()),
                 "workers": if config.workers == 0 { DEFAULT_WORKERS } else { config.workers },
+                "workerPanics": stats.worker_panics,
             })
         };
         Reply::json(200, body).send(request);
@@ -629,6 +647,11 @@ fn handle_request(mut request: tiny_http::Request, shared: &Shared) {
                     "hydra_umc_hil_bridge_transport_failures_total",
                     "Commands that could not be delivered (timeout, disconnected, refused).",
                     stats.transport_failures,
+                ),
+                Series::counter(
+                    "hydra_umc_hil_bridge_worker_panics_total",
+                    "Requests that ended in a panic.",
+                    stats.worker_panics,
                 ),
                 Series::counter(
                     "hydra_umc_hil_bridge_mirrored_total",
@@ -1088,6 +1111,7 @@ fn stop_lapsed_leases(
     stats: &mut Stats,
 ) {
     for stop in leases.due_stops(now_ms()) {
+        let destination = sink.name();
         let result = sink.stop(&stop.joint);
         let delivered = result.is_ok();
         if delivered {
@@ -1117,6 +1141,7 @@ fn stop_lapsed_leases(
                     .to_string(),
                 Err(e) => format!("the stop could not be delivered: {e}"),
             }),
+            sink: Some(destination),
         };
         if let Err(e) = audit.record(entry) {
             stats.audit_failures += 1;
@@ -1170,6 +1195,7 @@ fn audit_entry(
         kind: None,
         delivered: None,
         reason: None,
+        sink: None,
     }
 }
 
@@ -1279,6 +1305,11 @@ fn handle_route(raw: &str, state: &mut State, context: &RouteContext, info: &Req
         None => &mut recording_sim,
     };
 
+    // Where this order goes when it is delivered, so that "delivered" is not read as "it reached the robot".
+    let destination = match req.mode {
+        Mode::Real => real_sink.name(),
+        Mode::Simulation => sim_sink.name(),
+    };
     let outcome = match req.mode {
         Mode::Simulation => bridge.route_command(command.clone(), req.risk, real_sink, sim_sink),
         Mode::Real => {
@@ -1403,6 +1434,7 @@ fn handle_route(raw: &str, state: &mut State, context: &RouteContext, info: &Req
         );
         done.kind = Some(outcome.kind());
         done.delivered = Some(outcome.delivered());
+        done.sink = Some(destination);
         done.reason = match &outcome {
             RouteOutcome::BlockedByInterlock { reason }
             | RouteOutcome::TransportFailure { reason } => Some(reason.clone()),
@@ -1433,6 +1465,7 @@ fn handle_route(raw: &str, state: &mut State, context: &RouteContext, info: &Req
     eprintln!("{}", outcome.log_line(req.mode));
     Reply::json(200, serde_json::to_value(&outcome).unwrap())
         .with("X-Outcome-Kind", outcome.kind())
+        .with("X-Sink", destination)
         .with(
             "X-Delivered",
             if outcome.delivered() { "true" } else { "false" },
@@ -1605,6 +1638,7 @@ fn report_to_twin(shared: &Shared, report: &JointStateReport, info: &RequestInfo
                 MirrorOutcome::Failed { reason } => Some(reason.clone()),
                 _ => None,
             },
+            sink: None,
         };
         if let Err(e) = state.audit.record(entry) {
             state.stats.audit_failures += 1;
@@ -1663,6 +1697,7 @@ fn shadow_collision(
         kind: Some(outcome.kind()),
         delivered: None,
         reason,
+        sink: None,
     };
     if let Err(e) = state.audit.record(entry) {
         state.stats.audit_failures += 1;
@@ -1752,6 +1787,7 @@ fn shadow_precheck(
         kind: Some(kind),
         delivered: refusal.is_some().then_some(false),
         reason: Some(reason),
+        sink: None,
     };
     if let Err(e) = state.audit.record(entry) {
         state.stats.audit_failures += 1;
@@ -1856,6 +1892,7 @@ fn zones_precheck(
         kind: Some(kind),
         delivered: refusal.is_some().then_some(false),
         reason: Some(reason),
+        sink: None,
     };
     if let Err(e) = state.audit.record(entry) {
         state.stats.audit_failures += 1;
@@ -2253,6 +2290,76 @@ mod tests {
         let (status, resp) = post(port, "/mirror", body);
         assert_eq!(status, 200);
         assert!(resp.contains("\"mirrored\":true"));
+    }
+
+    #[test]
+    fn a_panic_in_a_request_costs_that_request_and_not_the_worker() {
+        let server = bind("127.0.0.1:0").expect("bind on an OS-assigned port must succeed");
+        let port = server
+            .server_addr()
+            .to_ip()
+            .expect("a real IP socket")
+            .port();
+        // one worker only: without the isolation the first panic would leave nobody to answer
+        thread::spawn(move || {
+            run_with_config(
+                server,
+                ServerConfig {
+                    workers: 1,
+                    ..ServerConfig::default()
+                },
+            )
+        });
+        for _ in 0..3 {
+            let _ = get(port, "/panic-in-a-test");
+        }
+        let (status, body) = get(port, "/stats");
+        assert_eq!(status, 200);
+        let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(parsed["workerPanics"], 3);
+        let (status, text) = get(port, "/metrics");
+        assert_eq!(status, 200);
+        assert!(text.contains("hydra_umc_hil_bridge_worker_panics_total 3"));
+    }
+
+    /// The header block of the answer to a `POST /route`.
+    fn route_headers(port: u16, body: &str) -> String {
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect must succeed");
+        let request = format!(
+            "POST /route HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        stream.write_all(request.as_bytes()).unwrap();
+        let mut raw = String::new();
+        stream.read_to_string(&mut raw).unwrap();
+        raw.split("\r\n\r\n")
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase()
+    }
+
+    #[test]
+    fn the_answer_and_the_audit_say_where_an_order_went() {
+        let port = start_test_server();
+        let real = r#"{"mode":"real","joint":"shoulder","position":1.0,"risk":{"collision_imminent":false,"distance_m":2.0}}"#;
+        assert!(route_headers(port, real).contains("x-sink: recording"));
+        let faulted = r#"{"mode":"real","joint":"shoulder","position":1.0,"risk":{"collision_imminent":false,"distance_m":2.0},"transport":{"disconnected":true}}"#;
+        assert!(route_headers(port, faulted).contains("x-sink: simulated_transport"));
+        let (status, body) = get(port, "/audit");
+        assert_eq!(status, 200);
+        let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+        let records = parsed["records"].as_array().expect("a list of records");
+        let sinks: Vec<&str> = records
+            .iter()
+            .filter(|r| r["phase"] == "outcome")
+            .filter_map(|r| r["sink"].as_str())
+            .collect();
+        assert!(sinks.contains(&"recording") && sinks.contains(&"simulated_transport"));
+        // an order that was only received delivers nothing, so it names no sink
+        assert!(records
+            .iter()
+            .filter(|r| r["phase"] == "order")
+            .all(|r| r.get("sink").is_none()));
     }
 
     #[test]

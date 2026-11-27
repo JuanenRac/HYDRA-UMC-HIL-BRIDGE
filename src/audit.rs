@@ -38,6 +38,10 @@ pub struct AuditEntry {
     pub kind: Option<&'static str>,
     pub delivered: Option<bool>,
     pub reason: Option<String>,
+    /// Where the order (or the stop of the watchdog) went: `recording`, `sim_robot` or `simulated_transport`. Left out of the record of a
+    /// phase that delivers nothing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sink: Option<&'static str>,
 }
 
 /// The caller label of a request: the header value when it is short printable text, else `unidentified`.
@@ -117,6 +121,7 @@ mod tests {
             kind: None,
             delivered: None,
             reason: None,
+            sink: None,
         }
     }
 

@@ -4,6 +4,9 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+- **A request that ends in a panic no longer costs a worker:** each request runs isolated, the worker (which also runs the watchdog) goes on, and the panic is counted in `workerPanics` of `GET /stats` and `hydra_umc_hil_bridge_worker_panics_total`.
+- **The answer of `POST /route` and the audit say where an order went:** the header `X-Sink` and the `sink` field of the `outcome` and `watchdog` records are `recording`, `sim_robot` or `simulated_transport`, so a delivered order is not read as one that reached a robot.
+- **The readers of what other services answer are fuzzed with a fixed seed:** 100000 mangled time stamps, zone states, collision predictions and HTTP answers, non ASCII text included, never panic and never let a command through without a recent `READY`.
 - **The reader of joint limits is tested on the same questionable files as HYDRA-UMC-PHYSICS-REPLICA:** `src/urdf_invalid/` with a table that says what each reader does and where they differ on purpose (a missing `<limit>` or bound is refused here, a joint that follows another cannot be commanded).
 - **Key and token files saved with a byte order mark are read:** a file written by an editor of Windows as "UTF-8 with BOM" kept the mark in front of the secret, so the tokens of the server were refused. The mark is dropped now; a file in another encoding (UTF-16) is refused.
 - **A verdict of the twin can be registered once and named by each command:** `POST /twin-pass/register` takes the verdict with all the samples of its trajectory (up to 4 MiB; a command is limited to 16 KiB, so a long trajectory could never travel inside one), checks it as for a command and keeps at most eight; a command then carries `twin_pass_ref` with the nonce. `twin_pass` inside the command works as before.

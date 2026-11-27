@@ -76,7 +76,12 @@ pub fn request(
     let mut raw = Vec::new();
     let mut limited = (&mut stream).take(max_bytes);
     limited.read_to_end(&mut raw).map_err(|_| timed_out())?;
-    let text = String::from_utf8_lossy(&raw);
+    parse_answer(&raw)
+}
+
+/// Reads the bytes of one whole answer. Anything without a header block and a status code is no answer.
+pub fn parse_answer(raw: &[u8]) -> Result<HttpAnswer, TransportError> {
+    let text = String::from_utf8_lossy(raw);
     let (head, answer) = text
         .split_once("\r\n\r\n")
         .ok_or(TransportError::Disconnected)?;
