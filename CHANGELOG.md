@@ -4,6 +4,7 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+- **Key and token files saved with a byte order mark are read:** a file written by an editor of Windows as "UTF-8 with BOM" kept the mark in front of the secret, so the tokens of the server were refused. The mark is dropped now; a file in another encoding (UTF-16) is refused.
 - **A verdict of the twin can be registered once and named by each command:** `POST /twin-pass/register` takes the verdict with all the samples of its trajectory (up to 4 MiB; a command is limited to 16 KiB, so a long trajectory could never travel inside one), checks it as for a command and keeps at most eight; a command then carries `twin_pass_ref` with the nonce. `twin_pass` inside the command works as before.
 - **The points of a passed trajectory can be required in order:** `--twin-pass-ordered` (or `HYDRA_UMC_HIL_BRIDGE_TWIN_PASS_ORDERED=1`) refuses a point of a joint that is not the next one of the verdict. Off by default.
 

@@ -50,6 +50,7 @@ pub fn load_token(file: Option<&str>, env_value: Option<&str>) -> Result<Option<
     if let Some(path) = file {
         token = std::fs::read_to_string(path)
             .map_err(|e| format!("cannot read the token file: {e}"))?
+            .trim_start_matches('\u{feff}')
             .trim()
             .to_string();
     }
@@ -156,6 +157,15 @@ mod tests {
         std::fs::write(&path, format!("{TOKEN}\n")).unwrap();
         // the file wins over the environment
         let loaded = load_token(path.to_str(), Some("an-environment-token-9999"));
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(loaded, Ok(Some(TOKEN.to_string())));
+    }
+
+    #[test]
+    fn a_byte_order_mark_is_not_part_of_the_token() {
+        let path = std::env::temp_dir().join(format!("access-bom-{}.token", std::process::id()));
+        std::fs::write(&path, format!("\u{feff}{TOKEN}\r\n")).unwrap();
+        let loaded = load_token(path.to_str(), None);
         let _ = std::fs::remove_file(&path);
         assert_eq!(loaded, Ok(Some(TOKEN.to_string())));
     }
