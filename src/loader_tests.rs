@@ -639,3 +639,60 @@ fn the_number_of_points_a_replay_reads_is_bounded_before_anything_is_started() {
     ])))
     .contains("cannot read"));
 }
+
+/// A fixed-seed generator (xorshift): the same strings on every run.
+struct Noise(u64);
+
+impl Noise {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+
+    /// A seed text with some characters replaced, removed or added, non ASCII ones included.
+    fn mangle(&mut self, seed: &str) -> String {
+        const POOL: [&str; 24] = [
+            "0", "1", "9", "-", "+", ":", ".", "T", "Z", " ", "{", "}", "\"", ",", "[", "]",
+            "\r\n", "HTTP", "é", "€", "𝄞", "\u{0}", "true", "READY",
+        ];
+        let mut chars: Vec<String> = seed.chars().map(String::from).collect();
+        for _ in 0..1 + self.next() % 6 {
+            let at = (self.next() as usize) % (chars.len() + 1);
+            let piece = POOL[(self.next() as usize) % POOL.len()].to_string();
+            match self.next() % 3 {
+                0 if at < chars.len() => chars[at] = piece,
+                1 if at < chars.len() => {
+                    chars.remove(at);
+                }
+                _ => chars.insert(at, piece),
+            }
+        }
+        chars.concat()
+    }
+}
+
+/// The parsers of what other services answer never panic, and no mangled answer lets a command through without a recent READY.
+#[test]
+fn mangled_answers_never_panic_and_never_allow_without_a_recent_ready() {
+    use crate::safety_zones::{assess, parse_iso_utc_ms, parse_state, ZonesDecision};
+
+    let stamp = "2026-01-02T03:04:05.123456+00:00";
+    let now = parse_iso_utc_ms(stamp).expect("the seed stamp is readable");
+    let zones = format!(r#"{{"sdkSafetyState":{{"state":"WARNING","timestamp_utc":"{stamp}"}}}}"#);
+    let verdict = r#"{"collision":false,"level":"clear","self_collision":false,"hits_total":0}"#;
+    let answer = "HTTP/1.1 200 OK\r\nX-Next-Cursor: a\r\nContent-Length: 2\r\n\r\n{}";
+    let mut noise = Noise(0x9E37_79B9_7F4A_7C15);
+    for _ in 0..25_000 {
+        let _ = parse_iso_utc_ms(&noise.mangle(stamp));
+        let parsed = parse_state(200, &noise.mangle(&zones));
+        if assess(&parsed, now, 1_000) == ZonesDecision::Allow {
+            let seen = parsed.expect("only a read verdict can allow");
+            assert_eq!(seen.state, "READY");
+            assert!(seen.at_ms.is_some_and(|at| now.abs_diff(at) <= 2_000));
+        }
+        let _ = crate::collision_shadow::parse_verdict(200, &noise.mangle(verdict));
+        let _ = crate::http_client::parse_answer(noise.mangle(answer).as_bytes());
+    }
+}

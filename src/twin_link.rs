@@ -254,6 +254,10 @@ impl TwinSimSink {
 }
 
 impl crate::bridge::CommandSink for TwinSimSink {
+    fn name(&self) -> &'static str {
+        "sim_robot"
+    }
+
     fn send(&mut self, command: &crate::protocol::JointCommand) -> Result<(), TransportError> {
         self.post(&serde_json::json!({"joint": command.joint, "position": command.position}))
     }

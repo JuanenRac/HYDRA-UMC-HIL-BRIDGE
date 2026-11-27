@@ -205,7 +205,11 @@ command for an unknown joint or a position outside its range is refused (counted
 
 **`GET /stats`** — `200` with the process-lifetime counters: `role`,
 `routedReal`, `routedSimulation`, `blockedByInterlock`, `transportFailures`,
-`mirrored`, `mirrorFailures`, `malformedRequests` and `notFound`.
+`mirrored`, `mirrorFailures`, `malformedRequests` and `notFound`. `workerPanics` counts the requests that ended in a panic: each one
+is lost alone, and the worker that ran it goes on.
+
+**Where an order went.** The answer of `POST /route` carries `X-Sink: recording|sim_robot|simulated_transport`, and the `outcome` and
+`watchdog` records of the audit carry the same value in `sink`. A delivered order reached that place; none of the three is a real robot.
 
 A known path with the wrong method (`GET /route`, `POST /stats`) is `405`
 with an `Allow` header; any other path is `404`.
