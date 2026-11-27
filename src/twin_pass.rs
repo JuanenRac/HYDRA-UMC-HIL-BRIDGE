@@ -117,6 +117,17 @@ impl VerdictLedger {
         }
     }
 
+    /// The first sample that moves `joint` and was not sent yet under this verdict: with the order demanded, the only one that may go.
+    pub fn next_unsent(&self, nonce: &str, joint: &str, samples: &[Sample]) -> Option<usize> {
+        let used = self.entries.get(nonce).map(|entry| &entry.used);
+        samples
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.joints.contains_key(joint))
+            .map(|(i, _)| i)
+            .find(|i| used.is_none_or(|u| !u.contains(&(*i, joint.to_string()))))
+    }
+
     /// Remember that this point was sent.
     pub fn mark(
         &mut self,
@@ -186,6 +197,18 @@ pub fn check(
     let Some(proof) = proof else {
         return Err("this bridge requires a pass verdict of the twin for the trajectory of a real command (field \"twin_pass\")".into());
     };
+    check_proof(proof, keys, robot_id, now_ms)?;
+    let v = &proof.verdict;
+    match_point(proof, v, command, ledger)
+}
+
+/// Everything a verdict and its samples must hold whatever the command is: used for each command and when a verdict is registered.
+pub fn check_proof(
+    proof: &Proof,
+    keys: &TrustedKeys,
+    robot_id: &str,
+    now_ms: u64,
+) -> Result<(), String> {
     if keys.is_empty() {
         return Err("no twin public key is configured on this bridge (--twin-public-key-file): a verdict cannot be checked".into());
     }
@@ -240,6 +263,16 @@ pub fn check(
     if v.valid_until_ms <= v.issued_at_ms || now_ms > v.valid_until_ms {
         return Err("the verdict is out of its validity window: ask the twin again".into());
     }
+    Ok(())
+}
+
+/// The point of the verified trajectory this command is.
+fn match_point(
+    proof: &Proof,
+    v: &Verdict,
+    command: &JointCommand,
+    ledger: &VerdictLedger,
+) -> Result<Matched, String> {
     let candidates: Vec<usize> = proof
         .samples
         .iter()

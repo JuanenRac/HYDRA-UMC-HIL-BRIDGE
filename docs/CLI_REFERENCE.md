@@ -257,6 +257,7 @@ command, too old, from the future or already used, answers `200` with `{"Blocked
 | `--require-twin-pass` | `HYDRA_UMC_HIL_BRIDGE_REQUIRE_TWIN_PASS=1` | Also require the pass verdict of the twin for the trajectory of a real command, and lock the switch on (see `docs/TWIN_PASS.md`). Off by default. |
 | `--twin-robot-id NAME` | `HYDRA_UMC_HIL_BRIDGE_TWIN_ROBOT_ID` | The robot a verdict must be for. |
 | `--twin-pass-file FILE` | | Where the value of `require_twin_pass` is kept (`{"require_twin_pass": true}`). |
+| `--twin-pass-ordered` | `HYDRA_UMC_HIL_BRIDGE_TWIN_PASS_ORDERED=1` | Accept the points of a passed trajectory only in its order, joint by joint. Off by default. |
 | `--audit-log FILE` | `HYDRA_UMC_HIL_BRIDGE_AUDIT_LOG` | Append every real order (`order` before it is decided, `outcome` after) as a JSON line; an order whose record cannot be written is refused with `503`. |
 | `--max-valid-for-ms N` | | Longest validity window accepted for a real command, 1 to 60000 (default 1000). |
 | `--allow-undated-commands` | `HYDRA_UMC_HIL_BRIDGE_ALLOW_UNDATED_COMMANDS=1` | Accept a real command without `issued_at_ms` and `valid_for_ms`. Off by default; announced at every start: such a command stays in force if its producer stops. |
