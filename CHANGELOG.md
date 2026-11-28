@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here.
 
-## [Unreleased]
+## [0.1.9] - Registered twin verdicts, ordered points and isolated requests
 
 - **A request that ends in a panic no longer costs a worker:** each request runs isolated, the worker (which also runs the watchdog) goes on, and the panic is counted in `workerPanics` of `GET /stats` and `hydra_umc_hil_bridge_worker_panics_total`.
 - **The answer of `POST /route` and the audit say where an order went:** the header `X-Sink` and the `sink` field of the `outcome` and `watchdog` records are `recording`, `sim_robot` or `simulated_transport`, so a delivered order is not read as one that reached a robot.
